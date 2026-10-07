@@ -1,0 +1,10 @@
+#!/bin/sh
+# The nv command of the plugin. Claude Code puts this folder on the PATH of its Bash tool.
+# The real binary is downloaded once (see scripts/ensure-nv.sh); then this runs it.
+# Arguments, stdin and the exit code pass through. The model is not needed here: the
+# session start hook fetches it, and nv itself says when it is missing.
+set -eu
+
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+BINARY=$("$ROOT/scripts/ensure-nv.sh" --binary) || exit 1
+exec "$BINARY" "$@"
