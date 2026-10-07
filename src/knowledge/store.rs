@@ -1,10 +1,11 @@
 //! Saves and loads notes in SQLite. Every change goes to the change log.
 
 use anyhow::{Result, anyhow, bail};
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, named_params};
 
 use super::change_log::{self, Action, Actor};
 use super::note::{Note, NoteChanges, NoteDraft, NoteStatus, Source};
+use super::people::person_name;
 use crate::clock::Now;
 
 pub struct NoteStore<'c> {
@@ -36,6 +37,7 @@ impl<'c> NoteStore<'c> {
             created_at: now.timestamp(),
             updated_at: now.timestamp(),
         };
+        self.check_owner(&note)?;
         let tx = self.conn.unchecked_transaction()?;
         note.id = insert(&tx, &note, None)?;
         change_log::record(&tx, now, actor, Action::Add, note.id, None)?;
@@ -44,73 +46,60 @@ impl<'c> NoteStore<'c> {
     }
 
     pub fn get(&self, id: i64) -> Result<Option<Note>> {
-        type Row = (
-            String,
-            String,
-            String,
-            Option<String>,
-            Option<String>,
-            String,
-            Option<String>,
-            Option<String>,
-            Option<String>,
-            Option<String>,
-            String,
-            String,
-        );
-        let row: Option<Row> = self
+        /// The columns of `notes` as SQLite gives them, before the words are parsed.
+        struct Row {
+            title: String,
+            body: String,
+            area: String,
+            note_type: Option<String>,
+            project: Option<String>,
+            status: String,
+            commitment_status: Option<String>,
+            source_kind: Option<String>,
+            source_ref: Option<String>,
+            expires_on: Option<String>,
+            owner: Option<i64>,
+            planned_for: Option<String>,
+            closed_at: Option<String>,
+            created_at: String,
+            updated_at: String,
+        }
+        let row = self
             .conn
-            .query_row(
-                "SELECT title, body, area, type, project, status, commitment_status,
-                        source_kind, source_ref, expires_on, created_at, updated_at
-                 FROM notes WHERE id = ?1",
-                [id],
-                |row| {
-                    Ok((
-                        row.get(0)?,
-                        row.get(1)?,
-                        row.get(2)?,
-                        row.get(3)?,
-                        row.get(4)?,
-                        row.get(5)?,
-                        row.get(6)?,
-                        row.get(7)?,
-                        row.get(8)?,
-                        row.get(9)?,
-                        row.get(10)?,
-                        row.get(11)?,
-                    ))
-                },
-            )
+            .query_row("SELECT * FROM notes WHERE id = ?1", [id], |row| {
+                Ok(Row {
+                    title: row.get("title")?,
+                    body: row.get("body")?,
+                    area: row.get("area")?,
+                    note_type: row.get("type")?,
+                    project: row.get("project")?,
+                    status: row.get("status")?,
+                    commitment_status: row.get("commitment_status")?,
+                    source_kind: row.get("source_kind")?,
+                    source_ref: row.get("source_ref")?,
+                    expires_on: row.get("expires_on")?,
+                    owner: row.get("owner_person_id")?,
+                    planned_for: row.get("planned_for")?,
+                    closed_at: row.get("closed_at")?,
+                    created_at: row.get("created_at")?,
+                    updated_at: row.get("updated_at")?,
+                })
+            })
             .optional()?;
-        let Some((
-            title,
-            body,
-            area,
-            note_type,
-            project,
-            status,
-            commitment_status,
-            source_kind,
-            source_ref,
-            expires_on,
-            created_at,
-            updated_at,
-        )) = row
-        else {
+        let Some(row) = row else {
             return Ok(None);
         };
-        let source_kind = source_kind.map(|kind| kind.parse()).transpose()?;
+        let source_kind = row.source_kind.map(|kind| kind.parse()).transpose()?;
         Ok(Some(Note {
             id,
-            title,
-            body,
-            area: area.parse()?,
-            note_type: note_type.map(|word| word.parse()).transpose()?,
-            project,
-            status: status.parse()?,
-            commitment_status: commitment_status.map(|word| word.parse()).transpose()?,
-            source: Source::from_parts(source_kind, source_ref)?,
+            title: row.title,
+            body: row.body,
+            area: row.area.parse()?,
+            note_type: row.note_type.map(|word| word.parse()).transpose()?,
+            project: row.project,
+            status: row.status.parse()?,
+            commitment_status: row.commitment_status.map(|word| word.parse()).transpose()?,
+            source: Source::from_parts(source_kind, row.source_ref)?,
             repos: self.words(
                 "SELECT repo FROM note_repos WHERE note_id = ?1 ORDER BY rowid",
                 id,
@@ -119,47 +108,67 @@ impl<'c> NoteStore<'c> {
                 "SELECT ticket_id FROM note_tickets WHERE note_id = ?1 ORDER BY rowid",
                 id,
             )?,
-            expires_on: expires_on.map(|date| date.parse()).transpose()?,
-            owner: None,
-            planned_for: None,
-            closed_at: None,
-            created_at,
-            updated_at,
+            expires_on: row.expires_on.map(|date| date.parse()).transpose()?,
+            owner: row.owner,
+            planned_for: row.planned_for.map(|date| date.parse()).transpose()?,
+            closed_at: row.closed_at,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
         }))
     }
 
     pub fn edit(&self, id: i64, changes: &NoteChanges, actor: Actor, now: &Now) -> Result<Note> {
+        self.change(id, Action::Edit, actor, now, |note| {
+            Ok(note.edited(changes)?)
+        })
+    }
+
+    /// Loads the note, applies `rule` to it, saves the result and logs `action` with the
+    /// state before. Nothing is saved when the rule refuses.
+    pub fn change(
+        &self,
+        id: i64,
+        action: Action,
+        actor: Actor,
+        now: &Now,
+        rule: impl FnOnce(&Note) -> Result<Note>,
+    ) -> Result<Note> {
         let before = self.existing(id)?;
-        let mut after = before.edited(changes)?;
+        let mut after = rule(&before)?;
         after.updated_at = now.timestamp();
+        self.check_owner(&after)?;
 
         let tx = self.conn.unchecked_transaction()?;
         tx.execute(
-            "UPDATE notes SET title = ?2, body = ?3, area = ?4, type = ?5, project = ?6,
-                    commitment_status = ?7, source_kind = ?8, source_ref = ?9, updated_at = ?10,
-                    expires_on = ?11
-             WHERE id = ?1",
-            params![
-                id,
-                after.title,
-                after.body,
-                after.area.as_str(),
-                after.note_type.map(|word| word.as_str()),
-                after.project,
-                after.commitment_status.map(|word| word.as_str()),
-                after.source.as_ref().map(|source| source.kind.as_str()),
-                after
-                    .source
-                    .as_ref()
-                    .map(|source| source.reference.as_str()),
-                after.updated_at,
-                after.expires_on.map(|date| date.to_string()),
-            ],
+            "UPDATE notes SET
+                title = :title, body = :body, area = :area, type = :type, project = :project,
+                status = :status, commitment_status = :commitment_status,
+                source_kind = :source_kind, source_ref = :source_ref,
+                expires_on = :expires_on, owner_person_id = :owner,
+                planned_for = :planned_for, closed_at = :closed_at, updated_at = :updated_at
+             WHERE id = :id",
+            named_params! {
+                ":id": id,
+                ":title": after.title,
+                ":body": after.body,
+                ":area": after.area.as_str(),
+                ":type": after.note_type.map(|word| word.as_str()),
+                ":project": after.project,
+                ":status": after.status.as_str(),
+                ":commitment_status": after.commitment_status.map(|word| word.as_str()),
+                ":source_kind": after.source.as_ref().map(|source| source.kind.as_str()),
+                ":source_ref": after.source.as_ref().map(|source| source.reference.as_str()),
+                ":expires_on": after.expires_on.map(|date| date.to_string()),
+                ":owner": after.owner,
+                ":planned_for": after.planned_for.map(|date| date.to_string()),
+                ":closed_at": after.closed_at,
+                ":updated_at": after.updated_at,
+            },
         )?;
         tx.execute("DELETE FROM note_repos WHERE note_id = ?1", [id])?;
         tx.execute("DELETE FROM note_tickets WHERE note_id = ?1", [id])?;
         insert_repos_and_tickets(&tx, &after)?;
-        change_log::record(&tx, now, actor, Action::Edit, id, Some(&before))?;
+        change_log::record(&tx, now, actor, action, id, Some(&before))?;
         tx.commit()?;
         Ok(after)
     }
@@ -196,6 +205,16 @@ impl<'c> NoteStore<'c> {
         self.get(id)?.ok_or_else(|| anyhow!("note #{id} not found"))
     }
 
+    /// The owner of a commitment must be a known person.
+    fn check_owner(&self, note: &Note) -> Result<()> {
+        match note.owner {
+            Some(owner) if person_name(self.conn, owner)?.is_none() => {
+                bail!("person #{owner} not found")
+            }
+            _ => Ok(()),
+        }
+    }
+
     fn words(&self, sql: &str, note_id: i64) -> Result<Vec<String>> {
         let mut statement = self.conn.prepare(sql)?;
         let words = statement.query_map([note_id], |row| row.get(0))?;
@@ -207,23 +226,29 @@ impl<'c> NoteStore<'c> {
 fn insert(conn: &Connection, note: &Note, id: Option<i64>) -> Result<i64> {
     conn.execute(
         "INSERT INTO notes (id, title, body, area, type, project, status, commitment_status,
-                            source_kind, source_ref, created_at, updated_at, expires_on)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
-        params![
-            id,
-            note.title,
-            note.body,
-            note.area.as_str(),
-            note.note_type.map(|word| word.as_str()),
-            note.project,
-            note.status.as_str(),
-            note.commitment_status.map(|word| word.as_str()),
-            note.source.as_ref().map(|source| source.kind.as_str()),
-            note.source.as_ref().map(|source| source.reference.as_str()),
-            note.created_at,
-            note.updated_at,
-            note.expires_on.map(|date| date.to_string()),
-        ],
+                            source_kind, source_ref, expires_on, owner_person_id,
+                            planned_for, closed_at, created_at, updated_at)
+         VALUES (:id, :title, :body, :area, :type, :project, :status, :commitment_status,
+                 :source_kind, :source_ref, :expires_on, :owner,
+                 :planned_for, :closed_at, :created_at, :updated_at)",
+        named_params! {
+            ":id": id,
+            ":title": note.title,
+            ":body": note.body,
+            ":area": note.area.as_str(),
+            ":type": note.note_type.map(|word| word.as_str()),
+            ":project": note.project,
+            ":status": note.status.as_str(),
+            ":commitment_status": note.commitment_status.map(|word| word.as_str()),
+            ":source_kind": note.source.as_ref().map(|source| source.kind.as_str()),
+            ":source_ref": note.source.as_ref().map(|source| source.reference.as_str()),
+            ":expires_on": note.expires_on.map(|date| date.to_string()),
+            ":owner": note.owner,
+            ":planned_for": note.planned_for.map(|date| date.to_string()),
+            ":closed_at": note.closed_at,
+            ":created_at": note.created_at,
+            ":updated_at": note.updated_at,
+        },
     )?;
     let id = conn.last_insert_rowid();
     insert_repos_and_tickets(conn, &Note { id, ..note.clone() })?;
@@ -234,13 +259,13 @@ fn insert_repos_and_tickets(conn: &Connection, note: &Note) -> Result<()> {
     for repo in &note.repos {
         conn.execute(
             "INSERT INTO note_repos (note_id, repo) VALUES (?1, ?2)",
-            params![note.id, repo],
+            rusqlite::params![note.id, repo],
         )?;
     }
     for ticket in &note.tickets {
         conn.execute(
             "INSERT INTO note_tickets (note_id, ticket_id) VALUES (?1, ?2)",
-            params![note.id, ticket],
+            rusqlite::params![note.id, ticket],
         )?;
     }
     Ok(())

@@ -11,7 +11,15 @@ word_enum!(
     Actor, "actor", { Claude => "claude", User => "user" }
 );
 word_enum!(
-    Action, "action", { Add => "add", Edit => "edit", Delete => "delete", Restore => "restore" }
+    Action, "action", {
+        Add => "add",
+        Edit => "edit",
+        Delete => "delete",
+        Restore => "restore",
+        Done => "done",
+        Drop => "drop",
+        Postpone => "postpone",
+    }
 );
 
 impl Actor {

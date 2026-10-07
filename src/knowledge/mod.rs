@@ -2,5 +2,6 @@
 
 pub mod change_log;
 pub mod note;
+pub mod people;
 pub mod secrets;
 pub mod store;

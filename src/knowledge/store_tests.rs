@@ -310,3 +310,144 @@ fn expires_on_is_saved_and_can_be_edited() {
     assert_eq!(edited.expires_on, Some("2026-10-19".parse().unwrap()));
     assert_eq!(store.get(added.id).unwrap(), Some(edited));
 }
+
+fn commitment_fields() -> NoteFields {
+    NoteFields {
+        note_type: Some(NoteType::Commitment),
+        ..retry_fields()
+    }
+}
+
+fn add_person(conn: &rusqlite::Connection, id: i64, name: &str) {
+    // People commands come in step 5.
+    conn.execute(
+        "INSERT INTO people (id, name) VALUES (?1, ?2)",
+        rusqlite::params![id, name],
+    )
+    .unwrap();
+}
+
+#[test]
+fn owner_and_planned_date_are_saved_and_read_back() {
+    let conn = db::open_in_memory().unwrap();
+    let store = NoteStore::new(&conn);
+    add_person(&conn, 7, "Anna Nowak");
+    add_person(&conn, 9, "Piotr Zielinski");
+    let mut fields = commitment_fields();
+    fields.owner = Some(7);
+    fields.planned_for = Some("2026-10-08".parse().unwrap());
+
+    let added = store
+        .add(&NoteDraft::new(fields).unwrap(), Actor::Claude, &at(MONDAY))
+        .unwrap();
+
+    assert_eq!(added.owner, Some(7));
+    assert_eq!(added.planned_for, Some("2026-10-08".parse().unwrap()));
+    assert_eq!(store.get(added.id).unwrap(), Some(added.clone()));
+
+    let changes = NoteChanges {
+        owner: Some(9),
+        ..NoteChanges::default()
+    };
+    let edited = store
+        .edit(added.id, &changes, Actor::User, &at(TUESDAY))
+        .unwrap();
+    assert_eq!(edited.owner, Some(9));
+    assert_eq!(store.get(added.id).unwrap(), Some(edited));
+}
+
+#[test]
+fn unknown_owner_is_refused_with_a_clear_message() {
+    let conn = db::open_in_memory().unwrap();
+    let store = NoteStore::new(&conn);
+    add_person(&conn, 7, "Anna Nowak");
+    let mut fields = commitment_fields();
+    fields.owner = Some(8);
+
+    let error = store
+        .add(&NoteDraft::new(fields).unwrap(), Actor::Claude, &at(MONDAY))
+        .unwrap_err();
+    assert_eq!(error.to_string(), "person #8 not found");
+    assert_eq!(store.get(1).unwrap(), None);
+
+    let mine = store
+        .add(
+            &NoteDraft::new(commitment_fields()).unwrap(),
+            Actor::Claude,
+            &at(MONDAY),
+        )
+        .unwrap();
+    let changes = NoteChanges {
+        owner: Some(8),
+        ..NoteChanges::default()
+    };
+    let error = store
+        .edit(mine.id, &changes, Actor::User, &at(TUESDAY))
+        .unwrap_err();
+    assert_eq!(error.to_string(), "person #8 not found");
+}
+
+#[test]
+fn change_applies_the_rule_saves_and_logs_the_previous_state() {
+    let conn = db::open_in_memory().unwrap();
+    let store = NoteStore::new(&conn);
+    let added = store
+        .add(
+            &NoteDraft::new(commitment_fields()).unwrap(),
+            Actor::Claude,
+            &at(MONDAY),
+        )
+        .unwrap();
+
+    let changed = store
+        .change(added.id, Action::Done, Actor::User, &at(TUESDAY), |note| {
+            Ok(Note {
+                commitment_status: Some(CommitmentStatus::Done),
+                closed_at: Some(TUESDAY.into()),
+                planned_for: Some("2026-10-06".parse().unwrap()),
+                ..note.clone()
+            })
+        })
+        .unwrap();
+
+    assert_eq!(changed.commitment_status, Some(CommitmentStatus::Done));
+    assert_eq!(changed.closed_at.as_deref(), Some(TUESDAY));
+    assert_eq!(changed.updated_at, TUESDAY);
+    assert_eq!(store.get(added.id).unwrap(), Some(changed));
+    let log = change_log::changes_of_note(&conn, added.id).unwrap();
+    assert_eq!(log.len(), 2);
+    assert_eq!(log[1].action, Action::Done);
+    assert_eq!(log[1].actor, Actor::User);
+    assert_eq!(log[1].before, Some(added));
+}
+
+#[test]
+fn refused_change_saves_nothing() {
+    let conn = db::open_in_memory().unwrap();
+    let store = NoteStore::new(&conn);
+    let added = store
+        .add(&retry_draft(), Actor::Claude, &at(MONDAY))
+        .unwrap();
+
+    let error = store
+        .change(added.id, Action::Done, Actor::User, &at(TUESDAY), |_| {
+            anyhow::bail!("the rule says no")
+        })
+        .unwrap_err();
+
+    assert_eq!(error.to_string(), "the rule says no");
+    assert_eq!(store.get(added.id).unwrap(), Some(added.clone()));
+    assert_eq!(
+        change_log::changes_of_note(&conn, added.id).unwrap().len(),
+        1
+    );
+    assert_eq!(
+        store
+            .change(99, Action::Done, Actor::User, &at(TUESDAY), |note| Ok(
+                note.clone()
+            ))
+            .unwrap_err()
+            .to_string(),
+        "note #99 not found"
+    );
+}
