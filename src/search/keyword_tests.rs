@@ -38,7 +38,7 @@ fn search_finds_note_by_keyword() {
         "Connect through the bastion host.",
     );
 
-    assert_eq!(keyword_search(&conn, "retry", 5).unwrap(), [retry]);
+    assert_eq!(keyword_search(&conn, "retry", None, 5).unwrap(), [retry]);
 }
 
 #[test]
@@ -52,7 +52,7 @@ fn search_finds_word_in_title_or_body() {
     );
     add(&conn, "Retry 5 times", "For billing-api calls.");
 
-    let mut found = keyword_search(&conn, "bastion", 5).unwrap();
+    let mut found = keyword_search(&conn, "bastion", None, 5).unwrap();
     found.sort();
 
     assert_eq!(found, [in_title, in_body]);
@@ -69,7 +69,7 @@ fn title_match_ranks_above_body_match() {
     let in_title = add(&conn, "Bastion host address", "It changed last week.");
 
     assert_eq!(
-        keyword_search(&conn, "bastion", 5).unwrap(),
+        keyword_search(&conn, "bastion", None, 5).unwrap(),
         [in_title, in_body]
     );
 }
@@ -79,7 +79,7 @@ fn any_word_of_the_query_is_enough() {
     let conn = db::open_in_memory().unwrap();
     let retry = add(&conn, "Retry 5 times", "For billing-api calls.");
 
-    let found = keyword_search(&conn, "how many times do we retry billing calls", 5).unwrap();
+    let found = keyword_search(&conn, "how many times do we retry billing calls", None, 5).unwrap();
 
     assert_eq!(found, [retry]);
 }
@@ -89,8 +89,8 @@ fn search_matches_other_word_forms() {
     let conn = db::open_in_memory().unwrap();
     let retry = add(&conn, "Retry 5 times", "For billing-api calls.");
 
-    assert_eq!(keyword_search(&conn, "retries", 5).unwrap(), [retry]);
-    assert_eq!(keyword_search(&conn, "RETRYING", 5).unwrap(), [retry]);
+    assert_eq!(keyword_search(&conn, "retries", None, 5).unwrap(), [retry]);
+    assert_eq!(keyword_search(&conn, "RETRYING", None, 5).unwrap(), [retry]);
 }
 
 #[test]
@@ -106,7 +106,11 @@ fn search_survives_quotes_and_fts_operators_in_query() {
         "billing-api",
         "retry^2 NEAR(x",
     ] {
-        assert_eq!(keyword_search(&conn, query, 5).unwrap(), [retry], "{query}");
+        assert_eq!(
+            keyword_search(&conn, query, None, 5).unwrap(),
+            [retry],
+            "{query}"
+        );
     }
 }
 
@@ -115,8 +119,12 @@ fn query_without_words_finds_nothing() {
     let conn = db::open_in_memory().unwrap();
     add(&conn, "Retry 5 times", "For billing-api calls.");
 
-    assert!(keyword_search(&conn, "", 5).unwrap().is_empty());
-    assert!(keyword_search(&conn, " \"*()- ", 5).unwrap().is_empty());
+    assert!(keyword_search(&conn, "", None, 5).unwrap().is_empty());
+    assert!(
+        keyword_search(&conn, " \"*()- ", None, 5)
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[test]
@@ -131,8 +139,8 @@ fn edited_note_is_found_by_new_text_not_old() {
         .edit(id, &changes, Actor::User, &now())
         .unwrap();
 
-    assert_eq!(keyword_search(&conn, "exponential", 5).unwrap(), [id]);
-    assert!(keyword_search(&conn, "retry", 5).unwrap().is_empty());
+    assert_eq!(keyword_search(&conn, "exponential", None, 5).unwrap(), [id]);
+    assert!(keyword_search(&conn, "retry", None, 5).unwrap().is_empty());
 }
 
 #[test]
@@ -142,13 +150,13 @@ fn deleted_note_is_not_found_and_restored_note_is_found_again() {
     let id = add(&conn, "Retry 5 times", "For billing-api calls.");
 
     store.delete(id, Actor::User, &now()).unwrap();
-    assert!(keyword_search(&conn, "retry", 5).unwrap().is_empty());
+    assert!(keyword_search(&conn, "retry", None, 5).unwrap().is_empty());
 
     let deletion: i64 = conn
         .query_row("SELECT max(id) FROM change_log", [], |row| row.get(0))
         .unwrap();
     store.restore(deletion, Actor::User, &now()).unwrap();
-    assert_eq!(keyword_search(&conn, "retry", 5).unwrap(), [id]);
+    assert_eq!(keyword_search(&conn, "retry", None, 5).unwrap(), [id]);
 }
 
 #[test]
@@ -158,5 +166,25 @@ fn search_respects_limit() {
         add(&conn, &format!("Retry note {number}"), "Body.");
     }
 
-    assert_eq!(keyword_search(&conn, "retry", 3).unwrap().len(), 3);
+    assert_eq!(keyword_search(&conn, "retry", None, 3).unwrap().len(), 3);
+}
+
+#[test]
+fn search_looks_only_at_candidates_when_given() {
+    let conn = db::open_in_memory().unwrap();
+    let first = add(&conn, "Retry 5 times", "For billing-api calls.");
+    let second = add(&conn, "Retry budget", "At most 10% of calls.");
+    let third = add(&conn, "Retry with backoff", "Wait longer each time.");
+    let candidates = std::collections::HashSet::from([first, third]);
+
+    let mut found = keyword_search(&conn, "retry", Some(&candidates), 5).unwrap();
+    found.sort();
+    assert_eq!(found, [first, third]);
+
+    // The limit counts candidates, not notes that were filtered out.
+    let only_second = std::collections::HashSet::from([second]);
+    assert_eq!(
+        keyword_search(&conn, "retry", Some(&only_second), 1).unwrap(),
+        [second]
+    );
 }

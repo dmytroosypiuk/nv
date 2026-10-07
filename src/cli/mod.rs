@@ -192,7 +192,7 @@ pub fn run(cli: Cli, context: &Context, stdin: &mut dyn Read, out: &mut dyn Writ
         }
         Command::Search(args) | Command::Note(NoteCommand::Search(args)) => {
             let mut found = Vec::new();
-            for id in keyword_search(&conn, &args.query, args.limit)? {
+            for id in keyword_search(&conn, &args.query, None, args.limit)? {
                 found.extend(store.get(id)?);
             }
             if args.json {
