@@ -24,6 +24,8 @@ pub fn work_note(title: &str, body: &str) -> NoteFields {
         tickets: vec![],
         source: None,
         expires_on: None,
+        owner: None,
+        planned_for: None,
     }
 }
 

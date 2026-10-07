@@ -26,6 +26,8 @@ fn retry_fields() -> NoteFields {
             reference: "Sprint planning, 2026-10-05".into(),
         }),
         expires_on: None,
+        owner: None,
+        planned_for: None,
     }
 }
 
@@ -58,6 +60,9 @@ fn added_note_can_be_read_back_with_repos_and_tickets() {
             repos: fields.repos,
             tickets: fields.tickets,
             expires_on: None,
+            owner: None,
+            planned_for: None,
+            closed_at: None,
             created_at: MONDAY.into(),
             updated_at: MONDAY.into(),
         }

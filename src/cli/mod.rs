@@ -225,6 +225,8 @@ pub fn run(cli: Cli, context: &mut Context<'_>, streams: Streams<'_>) -> Result<
                 tickets: args.tickets,
                 source: Source::from_parts(args.source_kind, args.source_ref)?,
                 expires_on: args.expires_on,
+                owner: None,
+                planned_for: None,
             })?;
             let note = store.add(&draft, actor, &now)?;
             embed_in_background(context);
@@ -251,6 +253,7 @@ pub fn run(cli: Cli, context: &mut Context<'_>, streams: Streams<'_>) -> Result<
                 tickets: args.tickets,
                 source: Source::from_parts(args.source_kind, args.source_ref)?,
                 expires_on: args.expires_on,
+                owner: None,
             };
             let note = store.edit(args.id, &changes, actor, &now)?;
             embed_in_background(context);

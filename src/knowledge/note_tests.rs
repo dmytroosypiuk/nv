@@ -11,6 +11,8 @@ fn fields(title: &str, body: &str) -> NoteFields {
         tickets: vec![],
         source: None,
         expires_on: None,
+        owner: None,
+        planned_for: None,
     }
 }
 
@@ -28,6 +30,9 @@ fn note() -> Note {
         repos: vec!["billing-api".into()],
         tickets: vec![],
         expires_on: None,
+        owner: None,
+        planned_for: None,
+        closed_at: None,
         created_at: "2026-10-06T09:00:00+02:00".into(),
         updated_at: "2026-10-06T09:00:00+02:00".into(),
     }
@@ -112,7 +117,7 @@ fn source_needs_kind_and_reference_together() {
 }
 
 #[test]
-fn new_commitment_note_starts_as_todo() {
+fn new_commitment_starts_as_todo() {
     let mut commitment = fields("Send the report to Anna", "Promised on the daily.");
     commitment.note_type = Some(NoteType::Commitment);
     let commitment = NoteDraft::new(commitment).unwrap();
@@ -249,4 +254,120 @@ fn note_json_uses_the_words_from_the_design() {
     assert_eq!(json["status"], "active");
     assert_eq!(json["commitment_status"], serde_json::Value::Null);
     assert_eq!(serde_json::from_value::<Note>(json).unwrap(), note());
+}
+
+fn commitment(status: CommitmentStatus) -> Note {
+    Note {
+        note_type: Some(NoteType::Commitment),
+        commitment_status: Some(status),
+        owner: Some(7),
+        planned_for: Some("2026-10-08".parse().unwrap()),
+        ..note()
+    }
+}
+
+#[test]
+fn only_commitments_have_owner_and_planned_date() {
+    let mut with_owner = fields("title", "body");
+    with_owner.owner = Some(7);
+    assert_eq!(
+        NoteDraft::new(with_owner.clone()).unwrap_err(),
+        NoteError::OnlyCommitments { field: "an owner" }
+    );
+    let mut with_date = fields("title", "body");
+    with_date.note_type = Some(NoteType::Fact);
+    with_date.planned_for = Some("2026-10-08".parse().unwrap());
+    assert_eq!(
+        NoteDraft::new(with_date).unwrap_err(),
+        NoteError::OnlyCommitments {
+            field: "a planned date"
+        }
+    );
+
+    with_owner.note_type = Some(NoteType::Commitment);
+    with_owner.planned_for = Some("2026-10-08".parse().unwrap());
+    assert!(NoteDraft::new(with_owner).is_ok());
+
+    let owner_on_a_decision = NoteChanges {
+        owner: Some(7),
+        ..NoteChanges::default()
+    };
+    assert_eq!(
+        note().edited(&owner_on_a_decision).unwrap_err(),
+        NoteError::OnlyCommitments { field: "an owner" }
+    );
+}
+
+#[test]
+fn closed_commitment_keeps_its_type() {
+    let to_fact = NoteChanges {
+        note_type: Some(NoteType::Fact),
+        ..NoteChanges::default()
+    };
+
+    for status in [CommitmentStatus::Done, CommitmentStatus::Dropped] {
+        assert_eq!(
+            commitment(status).edited(&to_fact).unwrap_err(),
+            NoteError::ClosedCommitmentKeepsType { status }
+        );
+    }
+    assert_eq!(
+        NoteError::ClosedCommitmentKeepsType {
+            status: CommitmentStatus::Done
+        }
+        .to_string(),
+        "a done commitment keeps its type"
+    );
+}
+
+#[test]
+fn closed_commitment_can_still_get_a_better_title() {
+    let better = NoteChanges {
+        title: Some("Send the Q3 report".into()),
+        ..NoteChanges::default()
+    };
+    // Naming the type it already has is not a change.
+    let same_type = NoteChanges {
+        note_type: Some(NoteType::Commitment),
+        ..NoteChanges::default()
+    };
+    let done = commitment(CommitmentStatus::Done);
+
+    let edited = done.edited(&better).unwrap();
+
+    assert_eq!(
+        edited,
+        Note {
+            title: "Send the Q3 report".into(),
+            ..done.clone()
+        }
+    );
+    assert_eq!(done.edited(&same_type).unwrap(), done);
+}
+
+#[test]
+fn changing_type_away_from_commitment_clears_owner_and_planned_date() {
+    let to_fact = NoteChanges {
+        note_type: Some(NoteType::Fact),
+        ..NoteChanges::default()
+    };
+
+    let fact = commitment(CommitmentStatus::Todo).edited(&to_fact).unwrap();
+
+    assert_eq!(fact.commitment_status, None);
+    assert_eq!(fact.owner, None);
+    assert_eq!(fact.planned_for, None);
+}
+
+#[test]
+fn edit_can_change_the_owner_of_a_commitment() {
+    let to_me = NoteChanges {
+        owner: Some(9),
+        ..NoteChanges::default()
+    };
+
+    let edited = commitment(CommitmentStatus::Todo).edited(&to_me).unwrap();
+
+    assert_eq!(edited.owner, Some(9));
+    assert_eq!(edited.planned_for, Some("2026-10-08".parse().unwrap()));
 }

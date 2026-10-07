@@ -20,6 +20,8 @@ fn add(conn: &Connection, title: &str, body: &str) -> i64 {
         tickets: vec![],
         source: None,
         expires_on: None,
+        owner: None,
+        planned_for: None,
     })
     .unwrap();
     NoteStore::new(conn)

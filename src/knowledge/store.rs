@@ -30,6 +30,9 @@ impl<'c> NoteStore<'c> {
             repos: draft.repos.clone(),
             tickets: draft.tickets.clone(),
             expires_on: draft.expires_on,
+            owner: draft.owner,
+            planned_for: draft.planned_for,
+            closed_at: None,
             created_at: now.timestamp(),
             updated_at: now.timestamp(),
         };
@@ -117,6 +120,9 @@ impl<'c> NoteStore<'c> {
                 id,
             )?,
             expires_on: expires_on.map(|date| date.parse()).transpose()?,
+            owner: None,
+            planned_for: None,
+            closed_at: None,
             created_at,
             updated_at,
         }))

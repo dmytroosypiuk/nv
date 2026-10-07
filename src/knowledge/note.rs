@@ -19,6 +19,10 @@ pub enum NoteError {
     IncompleteSource,
     #[error("nothing to change: give at least one field")]
     NothingToChange,
+    #[error("only a commitment has {field}: use --type commitment")]
+    OnlyCommitments { field: &'static str },
+    #[error("a {status} commitment keeps its type")]
+    ClosedCommitmentKeepsType { status: CommitmentStatus },
     #[error(
         "the {field} looks like it holds {kind}. nv never stores secrets: \
          save how to get access instead"
@@ -145,6 +149,10 @@ pub struct NoteFields {
     pub source: Option<Source>,
     /// For time-limited facts: the last day the note is true.
     pub expires_on: Option<Date>,
+    /// Commitments only: the person who promised. `None` = me.
+    pub owner: Option<i64>,
+    /// Commitments only.
+    pub planned_for: Option<Date>,
 }
 
 impl NoteFields {
@@ -162,6 +170,16 @@ impl NoteFields {
         }
         if self.body.trim().is_empty() {
             return Err(NoteError::MissingBody);
+        }
+        if self.note_type != Some(NoteType::Commitment) {
+            if self.owner.is_some() {
+                return Err(NoteError::OnlyCommitments { field: "an owner" });
+            }
+            if self.planned_for.is_some() {
+                return Err(NoteError::OnlyCommitments {
+                    field: "a planned date",
+                });
+            }
         }
         self.repos = without_blanks_and_duplicates(self.repos);
         self.tickets = without_blanks_and_duplicates(self.tickets);
@@ -228,6 +246,7 @@ pub struct NoteChanges {
     pub tickets: Option<Vec<String>>,
     pub source: Option<Source>,
     pub expires_on: Option<Date>,
+    pub owner: Option<i64>,
 }
 
 /// A saved note.
@@ -247,6 +266,14 @@ pub struct Note {
     pub tickets: Vec<String>,
     #[serde(default)]
     pub expires_on: Option<Date>,
+    /// Commitments only: the person who promised. `None` = me.
+    #[serde(default, rename = "owner_person_id")]
+    pub owner: Option<i64>,
+    #[serde(default)]
+    pub planned_for: Option<Date>,
+    /// When a commitment was done or dropped.
+    #[serde(default)]
+    pub closed_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -258,16 +285,28 @@ impl Note {
             return Err(NoteError::NothingToChange);
         }
         let changes = changes.clone();
+        let note_type = changes.note_type.or(self.note_type);
+        if note_type != self.note_type
+            && let Some(status @ (CommitmentStatus::Done | CommitmentStatus::Dropped)) =
+                self.commitment_status
+        {
+            // Otherwise changing the type and back would reopen it.
+            return Err(NoteError::ClosedCommitmentKeepsType { status });
+        }
+        // A note that stops being a commitment loses what only commitments have.
+        let stays_commitment = note_type == Some(NoteType::Commitment);
         let fields = NoteFields {
             title: changes.title.unwrap_or_else(|| self.title.clone()),
             body: changes.body.unwrap_or_else(|| self.body.clone()),
             area: changes.area.unwrap_or(self.area),
-            note_type: changes.note_type.or(self.note_type),
+            note_type,
             project: changes.project.or_else(|| self.project.clone()),
             repos: changes.repos.unwrap_or_else(|| self.repos.clone()),
             tickets: changes.tickets.unwrap_or_else(|| self.tickets.clone()),
             source: changes.source.or_else(|| self.source.clone()),
             expires_on: changes.expires_on.or(self.expires_on),
+            owner: changes.owner.or(self.owner.filter(|_| stays_commitment)),
+            planned_for: self.planned_for.filter(|_| stays_commitment),
         }
         .checked()?;
 
@@ -288,6 +327,9 @@ impl Note {
             repos: fields.repos,
             tickets: fields.tickets,
             expires_on: fields.expires_on,
+            owner: fields.owner,
+            planned_for: fields.planned_for,
+            closed_at: self.closed_at.clone().filter(|_| stays_commitment),
             created_at: self.created_at.clone(),
             updated_at: self.updated_at.clone(),
         })
