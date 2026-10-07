@@ -1,0 +1,122 @@
+name: release
+
+# A tag v<version> builds nv for each platform, packs the model, and publishes a GitHub
+# release with SHA256SUMS. The plugin (plugin/scripts/ensure-nv.sh) downloads exactly
+# these files, so the names below must stay in step with that script (tests/release.rs
+# checks it).
+#
+# A manual run (workflow_dispatch) builds and packs everything and keeps the files as
+# artifacts of the run, but publishes nothing: use it to try this workflow.
+#
+# The Linux build runs on ubuntu-22.04 on purpose: the binary needs the glibc of the
+# machine that built it, so an old image keeps the minimum glibc low (2.35). The Apple
+# silicon build runs on macos-14.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  version:
+    runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: read
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo_version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
+          plugin_version=$(cat plugin/VERSION)
+          manifest_version=$(sed -n 's/.*"version": "\(.*\)".*/\1/p' plugin/.claude-plugin/plugin.json | head -n 1)
+          for other in "$plugin_version" "$manifest_version"; do
+            if [ "$other" != "$cargo_version" ]; then
+              echo "::error::versions differ: Cargo.toml $cargo_version, plugin/VERSION $plugin_version, plugin.json $manifest_version"
+              exit 1
+            fi
+          done
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "v${cargo_version}" ]; then
+            echo "::error::the tag ${GITHUB_REF_NAME} is not v${cargo_version}, the version in Cargo.toml"
+            exit 1
+          fi
+          echo "version=${cargo_version}" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - os: macos-14
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      # ONNX Runtime is downloaded here, at build time, and linked into the binary.
+      - run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Pack
+        shell: bash
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir dist
+          tar -czf "dist/nv-${VERSION}-${{ matrix.target }}.tar.gz" -C target/${{ matrix.target }}/release nv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nv-${{ matrix.target }}
+          path: dist/*
+
+  model:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      # The model is downloaded here, at setup time, from Hugging Face.
+      - run: spikes/embedding/fetch-model.sh
+      - name: Check the model against the pinned checksums
+        working-directory: models/bge-small-en-v1.5
+        run: sha256sum -c "$GITHUB_WORKSPACE/spikes/embedding/model.sha256"
+      - name: Pack
+        run: |
+          mkdir dist
+          tar -czf dist/model-bge-small-en-v1.5.tar.gz -C models bge-small-en-v1.5
+      - uses: actions/upload-artifact@v4
+        with:
+          name: model
+          path: dist/*
+
+  publish:
+    needs: [version, build, model]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum *.tar.gz > SHA256SUMS
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          prerelease=""
+          case "$VERSION" in *-*) prerelease="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "nv $VERSION" --generate-notes $prerelease
