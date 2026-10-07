@@ -9,7 +9,8 @@
 #   ./install.sh --dry-run  only print what would be done
 #
 # Where things go (override with the env vars):
-#   NV_BIN_DIR         ~/.local/bin        the nv binary
+#   NV_BIN_DIR         ~/.nv/bin           the nv binary, as nv-<version>
+#   NV_LINK_DIR        ~/.local/bin        nv: a link to it, for a terminal
 #   NV_HOME            ~/.nv               models/ (and later nv.db)
 #   CLAUDE_CONFIG_DIR  ~/.claude           settings.json, CLAUDE.md (the plugin is
 #                                          installed by the claude CLI)
@@ -23,7 +24,10 @@ case "${1:-}" in
 esac
 
 repo="$(cd "$(dirname "$0")" && pwd)"
-bin_dir="${NV_BIN_DIR:-$HOME/.local/bin}"
+bin_dir="${NV_BIN_DIR:-$HOME/.nv/bin}"
+link_dir="${NV_LINK_DIR:-$HOME/.local/bin}"
+version="$(cat "$repo/plugin/VERSION")"
+binary="$bin_dir/nv-$version"
 nv_home="${NV_HOME:-$HOME/.nv}"
 claude_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 model="bge-small-en-v1.5"
@@ -42,7 +46,7 @@ if ! command -v claude >/dev/null; then
 fi
 
 # 1. Another program called nv must not be replaced or shadowed by surprise.
-if other="$(command -v nv 2>/dev/null)" && [[ "$other" != "$bin_dir/nv" ]]; then
+if other="$(command -v nv 2>/dev/null)" && [[ "$other" != "$link_dir/nv" ]]; then
   echo "error: another nv is on your PATH: $other" >&2
   echo "       remove it or choose a different NV_BIN_DIR, then run again" >&2
   exit 1
@@ -58,9 +62,18 @@ fi
 echo "== build"
 run cargo build --release --manifest-path "$repo/Cargo.toml"
 
-echo "== binary -> $bin_dir/nv"
+# Where the plugin's launcher (plugin/bin/nv) looks for it: it then downloads nothing.
+echo "== binary -> $binary"
 run mkdir -p "$bin_dir"
-run install -m 755 "$repo/target/release/nv" "$bin_dir/nv"
+run install -m 755 "$repo/target/release/nv" "$binary"
+for old in "$bin_dir"/nv-*; do
+  if [[ -e "$old" && "$old" != "$binary" ]]; then run rm -f "$old"; fi
+done
+
+# `nv` in a terminal: a link to that binary (an earlier install left a copy here).
+echo "== link -> $link_dir/nv"
+run mkdir -p "$link_dir"
+run ln -sfn "$binary" "$link_dir/nv"
 
 echo "== model -> $nv_home/models/$model"
 run mkdir -p "$nv_home/models/$model"
@@ -146,9 +159,9 @@ if $dry_run; then
   exit 0
 fi
 case ":$PATH:" in
-  *":$bin_dir:"*) ;;
-  *) echo "note: $bin_dir is not on your PATH; add it so that Claude Code finds nv" ;;
+  *":$link_dir:"*) ;;
+  *) echo "note: $link_dir is not on your PATH; add it to use nv in a terminal (Claude Code finds nv through the plugin)" ;;
 esac
-NV_HOME="$nv_home" "$bin_dir/nv" model info
+NV_HOME="$nv_home" "$binary" model info
 echo
 echo "Done. Start a new Claude Code session and try the situations in docs/skill-test.md."

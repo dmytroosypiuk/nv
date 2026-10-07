@@ -45,6 +45,7 @@ impl Target {
             .arg(script)
             .args(args)
             .env("NV_BIN_DIR", self.dir.path().join("bin"))
+            .env("NV_LINK_DIR", self.dir.path().join("link"))
             .env("NV_HOME", self.dir.path().join("nv-home"))
             .env("CLAUDE_CONFIG_DIR", self.claude())
             .env("STUB_LOG", self.dir.path().join("claude-calls.log"))
@@ -82,6 +83,8 @@ fn repo_without_build(dir: &Path) -> PathBuf {
     fs::create_dir_all(&model).unwrap();
     fs::write(model.join("model.onnx"), "not a model").unwrap();
     fs::copy(repo().join("install.sh"), dir.join("install.sh")).unwrap();
+    fs::create_dir_all(dir.join("plugin")).unwrap();
+    fs::copy(repo().join("plugin/VERSION"), dir.join("plugin/VERSION")).unwrap();
     fs::create_dir_all(dir.join("claude")).unwrap();
     fs::copy(
         repo().join("claude/settings.snippet.json"),
@@ -107,6 +110,8 @@ fn dry_run_changes_nothing_and_names_every_step() {
     let said = String::from_utf8(output.stdout).unwrap();
     for step in [
         "cargo build --release",
+        "bin/nv-0.1.0",
+        "link/nv",
         "old standalone skill, removed",
         "skills/nv-capture",
         "claude plugin marketplace add",
@@ -126,6 +131,7 @@ fn dry_run_changes_nothing_and_names_every_step() {
     }
     assert!(!target.claude().join("settings.json").exists());
     assert!(!target.dir.path().join("bin").exists());
+    assert!(!target.dir.path().join("link").exists());
     assert_eq!(
         fs::read_to_string(target.claude().join("CLAUDE.md")).unwrap(),
         claude_md
@@ -165,7 +171,13 @@ fn install_twice_removes_the_old_nv_block_once_and_keeps_one_of_each_permission(
         fs::read_to_string(target.claude().join("CLAUDE.md.before-nv")).unwrap(),
         original
     );
-    assert!(target.dir.path().join("bin/nv").is_file());
+    // The binary is where the plugin's launcher looks for it; `nv` in a terminal is a link.
+    let binary = target.dir.path().join("bin/nv-0.1.0");
+    assert!(binary.is_file());
+    assert_eq!(
+        fs::read_link(target.dir.path().join("link/nv")).unwrap(),
+        binary
+    );
     let settings: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(target.claude().join("settings.json")).unwrap())
             .unwrap();
@@ -228,5 +240,75 @@ fn install_creates_settings_and_removes_a_claude_md_that_only_held_the_nv_lines(
     assert_eq!(
         fs::read_to_string(target.claude().join("settings.json")).unwrap(),
         fs::read_to_string(repo().join("claude/settings.snippet.json")).unwrap()
+    );
+}
+
+#[test]
+fn install_refuses_when_another_nv_is_on_the_path() {
+    let source = TempDir::new().unwrap();
+    let script = repo_without_build(source.path());
+    let target = Target::new();
+    let elsewhere = target.dir.path().join("elsewhere");
+    fs::create_dir(&elsewhere).unwrap();
+    fs::write(elsewhere.join("nv"), "#!/bin/sh\n").unwrap();
+    fs::set_permissions(elsewhere.join("nv"), fs::Permissions::from_mode(0o755)).unwrap();
+
+    let output = Command::new("bash")
+        .arg(&script)
+        .arg("--dry-run")
+        .env("NV_BIN_DIR", target.dir.path().join("bin"))
+        .env("NV_LINK_DIR", target.dir.path().join("link"))
+        .env("NV_HOME", target.dir.path().join("nv-home"))
+        .env("CLAUDE_CONFIG_DIR", target.claude())
+        .env("STUB_LOG", target.dir.path().join("claude-calls.log"))
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                elsewhere.display(),
+                target.path().to_string_lossy()
+            ),
+        )
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(1));
+    let said = String::from_utf8_lossy(&output.stderr);
+    assert!(said.contains("another nv is on your PATH"), "{said}");
+    assert!(said.contains("elsewhere"), "{said}");
+}
+
+#[test]
+#[ignore = "builds a release binary and needs the model in models/"]
+fn install_replaces_an_nv_that_an_earlier_install_left_in_the_link_folder() {
+    let target = Target::new();
+    let link = target.dir.path().join("link");
+    fs::create_dir(&link).unwrap();
+    fs::write(link.join("nv"), "an old copy of the binary").unwrap();
+
+    let output = Command::new("bash")
+        .arg(repo().join("install.sh"))
+        .env("NV_BIN_DIR", target.dir.path().join("bin"))
+        .env("NV_LINK_DIR", &link)
+        .env("NV_HOME", target.dir.path().join("nv-home"))
+        .env("CLAUDE_CONFIG_DIR", target.claude())
+        .env("STUB_LOG", target.dir.path().join("claude-calls.log"))
+        // The link folder is on the PATH, as ~/.local/bin is for a real user.
+        .env(
+            "PATH",
+            format!("{}:{}", link.display(), target.path().to_string_lossy()),
+        )
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        fs::read_link(link.join("nv")).unwrap(),
+        target.dir.path().join("bin/nv-0.1.0")
     );
 }

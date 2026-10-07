@@ -66,8 +66,9 @@ From a checkout, with the model in `models/` (`spikes/embedding/fetch-model.sh`,
 ./install.sh              # build; binary, model; the plugin from this folder; permissions
 ```
 
-`install.sh` also removes the standalone skills and the `# nv:start` block that earlier
-versions put into `~/.claude`.
+`install.sh` puts the binary where the plugin's launcher looks for it (`~/.nv/bin/nv-<version>`,
+so nothing is downloaded), links it as `~/.local/bin/nv` for a terminal, and removes the
+standalone skills and the `# nv:start` block that earlier versions put into `~/.claude`.
 
 ### Release
 
