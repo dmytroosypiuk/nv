@@ -69,3 +69,37 @@ fields, `--status`, `--project`, "showing N of M", first body line in results).
 
 Not tested: whether a fresh Claude Code session loads the skill at the right moments and
 writes notes of this quality on its own. That is the part to try in a real session.
+
+## Hand test log
+
+Each run used a scratch store and the four situations above. The reasons for each fix
+are in `docs/design.md`, "Decided while splitting the skill (step 7b)".
+
+| Run (2026-10-07) | Model | How | Went right | Went wrong | Fixed after the run |
+| --- | --- | --- | --- | --- | --- |
+| 1 | Opus 5.5 | all four in one message | Five good notes, real dates, weekdays, no password, asked about the exam | First body line in search stopped in the middle of a sentence | Search shows the first paragraph joined, cut at 100 characters |
+| 1, recall | Opus 5.5 | three questions in one message | All three answers right, from the notes; used `--planned` and the person ID | nothing | nothing |
+| 2 | Haiku 4.5 | all four in one message | Loaded the skill, saved without asking, no password, asked about the exam | "from 3 to 5" copied from the skill's example; role "Code reviewer" invented; told the user "Wed 2026-10-08" (a Thursday); `--type root-cause` and `--type deadline`; HR fact in `personal` without source or expiry | `SKILL.md` lists areas, types, source and expiry itself; "write only what the user said"; other main example; nv prints the weekday |
+| 3 | Haiku 4.5 | all four in one message | Valid types, right area and expiry, weekdays copied from nv | Anna's promise inside the decision note with "Friday 2026-10-11" (a Sunday); exam promise dropped; role "QA lead" copied from the people example | First step "one note for each item"; people example with placeholders; no weekday names in bodies |
+| 4 | Haiku 4.5 | one message each | Three notes for the first message, Anna's commitment with owner; nv answered `planned Sat 2026-10-10` and Haiku corrected the date itself; HR fact with source and expiry; no password | Body of the corrected note still said "Friday 2026-10-10"; exam promise asked about but never saved; role "Reviewer" invented | A promise with no clear day is saved without a date, then asked about; a corrected date is corrected in the body too; `SKILL.md` no longer shows `--role` |
+
+### Open issues
+
+- **The fixes after run 4 are not tested** with Haiku yet.
+- **Loading on a passing remark is not shown.** In every run the skill loaded on the
+  first, sprint-planning message. A decision said in the middle of a coding task, in a
+  fresh session, was never tried. Recall was tried with Opus only.
+- **Ukrainian and Polish input was not tried.** The descriptions and the CLAUDE.md lines
+  are in English.
+- **Haiku adds small things the user did not say** ("Need to standardize on UTC", a
+  source reference "token.rs investigation") in spite of the rule.
+- **Haiku hides errors** with `2>/dev/null` on searches in spite of the rule.
+- **Haiku leaves out fields the user gave**: `--repo billing-api` in every run.
+- **A wrong weekday in a body is not caught.** The weekday check and the `nv date` helper
+  are under "Later, not MVP" in `docs/design.md`.
+- **A password without a digit**, or said in other words, still passes the secret check.
+- **`nv note edit` and `nv note replace` cannot clear a field**; there is no unlink.
+- **The company-data rule in `nv-capture` is temporary**: Dmytro removes it when the
+  company rules for AI tools are checked.
+- **Work laptop:** build, both test runs, the background embedder and offline search are
+  only tested on Linux x86_64.

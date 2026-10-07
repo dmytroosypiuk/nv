@@ -275,14 +275,14 @@ fn capture_skill_md_alone_is_enough_for_a_correct_note() {
         "copy the weekday from the answer of nv",
         "one note for each item",
         "a promise by another person is its own commitment",
+        "save it without `--planned`",
+        "correct the date in the body too",
     ] {
         assert!(lower.contains(rule), "SKILL.md does not say: {rule}");
     }
-    // Haiku copied the role of the example person into the store: no real-looking role.
-    assert!(
-        !capture.contains("QA lead"),
-        "an example role can be copied"
-    );
+    // Haiku gave a person a role the user never said, three times: `SKILL.md` does not
+    // show `--role` at all. It is in cli-write.md for when the user does say a role.
+    assert!(!capture.contains("--role"), "SKILL.md shows --role");
 }
 
 #[test]

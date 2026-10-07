@@ -18,12 +18,12 @@ nv is the user's local notes store. You write the notes. What you do not save is
 3. **Save right away.** Ask about missing facts, never about whether to save. If the note
    needs a detail you do not have (which Anna, which date, which repo), ask that one
    question; a note with a guess in it is worse. A promise with no clear day ("next
-   week") is still a promise: ask for the day, do not drop it.
+   week"): save it without `--planned`, then ask for the day.
 4. **Confirm in one line**, with the weekday for any date: "Saved to nv: #42 Use
    PostgreSQL 16 for reporting" or "Saved to nv: #43 Send retry numbers to Anna,
    planned for Fri 2026-10-09". nv prints the weekday (`Saved #43, planned Fri
-   2026-10-09`). Copy the weekday from the answer of nv; do not calculate it. If the
-   weekday is not the one the user said, the date is wrong: correct it.
+   2026-10-09`). Copy the weekday from the answer of nv; do not calculate it. A weekday
+   the user did not say means a wrong date: correct the date in the body too (`--body`).
 
 Save decisions, commitments, ideas, root causes, people's availability and roles, how-to
 knowledge, limits of tools. Do not save routine steps, what git or the repo docs already
@@ -79,8 +79,8 @@ job. Save how to get access instead: "Staging database password: ask DevOps in
 
 People are addressed by ID: a name is not unique. Before `--person` or `--owner`, run
 `nv people search "anna"`. One match that fits: use that ID. Several, and the context
-does not decide: ask. No match: `nv people add "<name the user said>"`. Add
-`--role "<role>"` only when the user said the role.
+does not decide: ask. No match: `nv people add "<name the user said>"`, with
+the name only.
 
 ## Commitments
 
