@@ -15,6 +15,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("migrations/0001_initial.sql"),
     include_str!("migrations/0002_fts_triggers.sql"),
     include_str!("migrations/0003_change_log_for_people.sql"),
+    include_str!("migrations/0004_undone_at.sql"),
 ];
 
 /// The schema version this binary knows.
@@ -274,6 +275,29 @@ mod tests {
             .unwrap();
 
         assert_eq!(found, 1);
+    }
+
+    #[test]
+    fn migration_0004_keeps_change_log_rows_and_adds_undone_at() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        migrate(&mut conn, &MIGRATIONS[..3]).unwrap();
+        conn.execute(
+            "INSERT INTO change_log (id, at, actor, action, note_id) VALUES (5, ?1, 'user', 'add', 42)",
+            [NOW],
+        )
+        .unwrap();
+
+        migrate(&mut conn, MIGRATIONS).unwrap();
+
+        let (action, undone_at): (String, Option<String>) = conn
+            .query_row(
+                "SELECT action, undone_at FROM change_log WHERE id = 5",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(action, "add");
+        assert_eq!(undone_at, None);
     }
 
     #[test]

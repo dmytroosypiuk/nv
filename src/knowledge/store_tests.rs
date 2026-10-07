@@ -732,7 +732,8 @@ fn related_link_shows_on_both_notes() {
         actions(&conn, second.id),
         [Action::Add, Action::Link, Action::Link]
     );
-    assert_eq!(actions(&conn, first.id), [Action::Add]);
+    // The link is a change of both notes.
+    assert_eq!(actions(&conn, first.id), [Action::Add, Action::Link]);
 
     let itself = store
         .link(first.id, first.id, Actor::Claude, &at(TUESDAY))

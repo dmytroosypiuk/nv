@@ -4,7 +4,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
-use super::change_log::{self, Action, Actor};
+use super::change_log::{self, Action, Actor, Change};
 use super::person::{Person, PersonError, is_full_alias, same_name, tidy};
 use crate::clock::Now;
 
@@ -225,6 +225,16 @@ impl<'c> PeopleStore<'c> {
     pub fn undo_merge(&self, change_id: i64, actor: Actor, now: &Now) -> Result<(Person, Person)> {
         let change = change_log::change(self.conn, change_id)?
             .ok_or_else(|| anyhow!("change #{change_id} not found"))?;
+        let tx = self.conn.unchecked_transaction()?;
+        let people = self.undo_merge_unlogged(&change)?;
+        change_log::record_for_person(&tx, now, actor, Action::Undo, people.0.id, None)?;
+        tx.commit()?;
+        Ok(people)
+    }
+
+    /// `undo_merge` without its own transaction and without a change log entry.
+    pub(super) fn undo_merge_unlogged(&self, change: &Change) -> Result<(Person, Person)> {
+        let change_id = change.id;
         let before: MergeBefore = match (change.action, &change.before_json) {
             (Action::Merge, Some(json)) => serde_json::from_str(json)
                 .with_context(|| format!("change #{change_id} holds a merge nv cannot read"))?,
@@ -243,37 +253,56 @@ impl<'c> PeopleStore<'c> {
             bail!("person #{} already exists", merged.id);
         }
 
-        let tx = self.conn.unchecked_transaction()?;
+        let conn = self.conn;
         // The kept person first: it gives back the names the returning person needs.
-        save(&tx, &kept)?;
-        tx.execute(
+        save(conn, &kept)?;
+        conn.execute(
             "INSERT INTO people (id, name, role) VALUES (?1, ?2, ?3)",
             params![merged.id, merged.name, merged.role],
         )?;
-        save(&tx, &merged)?;
+        save(conn, &merged)?;
         // Notes deleted since the merge are simply not there to update.
         for note_id in moved_note_ids {
-            tx.execute(
+            conn.execute(
                 "UPDATE note_people SET person_id = ?1 WHERE note_id = ?2 AND person_id = ?3",
                 params![merged.id, note_id, kept.id],
             )?;
         }
         for note_id in shared_note_ids {
-            tx.execute(
+            conn.execute(
                 "INSERT OR IGNORE INTO note_people (note_id, person_id)
                  SELECT id, ?1 FROM notes WHERE id = ?2",
                 params![merged.id, note_id],
             )?;
         }
         for note_id in owned_note_ids {
-            tx.execute(
+            conn.execute(
                 "UPDATE notes SET owner_person_id = ?1 WHERE id = ?2 AND owner_person_id = ?3",
                 params![merged.id, note_id, kept.id],
             )?;
         }
-        change_log::record_for_person(&tx, now, actor, Action::Undo, kept.id, None)?;
-        tx.commit()?;
         Ok((kept, merged))
+    }
+
+    /// Writes a person back as they were. Nothing is written to the change log.
+    pub(super) fn put_state(&self, person: &Person) -> Result<()> {
+        save(self.conn, person)
+    }
+
+    /// Deletes a person that no note uses. Nothing is written to the change log.
+    pub(super) fn remove_unused(&self, id: i64) -> Result<()> {
+        let used: bool = self.conn.query_row(
+            "SELECT EXISTS (SELECT 1 FROM note_people WHERE person_id = ?1)
+                 OR EXISTS (SELECT 1 FROM notes WHERE owner_person_id = ?1)",
+            [id],
+            |row| row.get(0),
+        )?;
+        if used {
+            bail!("person #{id} is used by notes: it cannot be removed");
+        }
+        self.conn
+            .execute("DELETE FROM people WHERE id = ?1", [id])?;
+        Ok(())
     }
 
     fn note_ids(&self, sql: &str, person_id: i64) -> Result<Vec<i64>> {

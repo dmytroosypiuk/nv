@@ -237,12 +237,20 @@ impl<'c> NoteStore<'c> {
     pub fn link(&self, id: i64, other_id: i64, actor: Actor, now: &Now) -> Result<bool> {
         let note = self.existing(id)?;
         let linked = note.linked_to(other_id)?;
-        self.existing(other_id)?;
+        let other = self.existing(other_id)?;
         if linked == note {
             return Ok(false);
         }
-        self.change(id, Action::Link, actor, now, |_| Ok(linked))?;
-        Ok(true)
+        // Logged on both notes, each with its state before: the link changes both.
+        self.in_transaction(|| {
+            self.apply(id, Action::Link, actor, now, |_| Ok(linked))?;
+            self.conn.execute(
+                "UPDATE notes SET updated_at = ?2 WHERE id = ?1",
+                rusqlite::params![other_id, now.timestamp()],
+            )?;
+            change_log::record(self.conn, now, actor, Action::Link, other_id, Some(&other))?;
+            Ok(true)
+        })
     }
 
     /// Removes the note; the change log keeps it. Returns the deleted note.

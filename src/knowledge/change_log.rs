@@ -51,6 +51,8 @@ pub struct Change {
     pub person_id: Option<i64>,
     /// The state before the change, as JSON; `None` when there was nothing before.
     pub before_json: Option<String>,
+    /// When the change was undone; `None` when it still stands.
+    pub undone_at: Option<String>,
 }
 
 impl Change {
@@ -113,7 +115,7 @@ fn insert(
     Ok(conn.last_insert_rowid())
 }
 
-const COLUMNS: &str = "id, at, actor, action, note_id, person_id, before_json";
+const COLUMNS: &str = "id, at, actor, action, note_id, person_id, before_json, undone_at";
 
 /// All changes of one note, oldest first.
 pub fn changes_of_note(conn: &Connection, note_id: i64) -> Result<Vec<Change>> {
@@ -130,35 +132,82 @@ pub fn change(conn: &Connection, change_id: i64) -> Result<Option<Change>> {
     Ok(changes_where(conn, "id = ?1", change_id)?.pop())
 }
 
+/// The change log, newest first; with a note or a person, only their changes.
+pub fn recent(
+    conn: &Connection,
+    note_id: Option<i64>,
+    person_id: Option<i64>,
+    limit: usize,
+) -> Result<Vec<Change>> {
+    let mut statement = conn.prepare(&format!(
+        "SELECT {COLUMNS} FROM change_log
+         WHERE (?1 IS NULL OR note_id = ?1) AND (?2 IS NULL OR person_id = ?2)
+         ORDER BY id DESC LIMIT ?3"
+    ))?;
+    let rows = statement.query_map(rusqlite::params![note_id, person_id, limit as i64], raw)?;
+    rows.map(|row| from_raw(row?)).collect()
+}
+
+impl Change {
+    /// A change that can still be undone: it was not undone and is not itself an undo.
+    pub fn stands(&self) -> bool {
+        self.undone_at.is_none() && !matches!(self.action, Action::Undo | Action::Restore)
+    }
+}
+
+/// Marks a change as undone. It stays in the log.
+pub(super) fn mark_undone(conn: &Connection, change_id: i64, now: &Now) -> Result<()> {
+    conn.execute(
+        "UPDATE change_log SET undone_at = ?2 WHERE id = ?1",
+        rusqlite::params![change_id, now.timestamp()],
+    )?;
+    Ok(())
+}
+
 fn changes_where(conn: &Connection, condition: &str, id: i64) -> Result<Vec<Change>> {
     let mut statement = conn.prepare(&format!(
         "SELECT {COLUMNS} FROM change_log WHERE {condition} ORDER BY id"
     ))?;
-    let rows = statement.query_map([id], |row| {
-        Ok((
-            row.get::<_, i64>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, String>(2)?,
-            row.get::<_, String>(3)?,
-            row.get::<_, Option<i64>>(4)?,
-            row.get::<_, Option<i64>>(5)?,
-            row.get::<_, Option<String>>(6)?,
-        ))
-    })?;
-    let mut changes = Vec::new();
-    for row in rows {
-        let (id, at, actor, action, note_id, person_id, before_json) = row?;
-        changes.push(Change {
-            id,
-            at,
-            actor: actor.parse()?,
-            action: action.parse()?,
-            note_id,
-            person_id,
-            before_json,
-        });
-    }
-    Ok(changes)
+    let rows = statement.query_map([id], raw)?;
+    rows.map(|row| from_raw(row?)).collect()
+}
+
+type RawChange = (
+    i64,
+    String,
+    String,
+    String,
+    Option<i64>,
+    Option<i64>,
+    Option<String>,
+    Option<String>,
+);
+
+fn raw(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawChange> {
+    Ok((
+        row.get(0)?,
+        row.get(1)?,
+        row.get(2)?,
+        row.get(3)?,
+        row.get(4)?,
+        row.get(5)?,
+        row.get(6)?,
+        row.get(7)?,
+    ))
+}
+
+fn from_raw(raw: RawChange) -> Result<Change> {
+    let (id, at, actor, action, note_id, person_id, before_json, undone_at) = raw;
+    Ok(Change {
+        id,
+        at,
+        actor: actor.parse()?,
+        action: action.parse()?,
+        note_id,
+        person_id,
+        before_json,
+        undone_at,
+    })
 }
 
 #[cfg(test)]
