@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Developer install of nv for the current user, from this checkout: the binary, the
 # embedding model, the Claude Code plugin (the two skills) from this folder as a local
-# marketplace, the permissions and the nv lines in CLAUDE.md. No root needed. Never touches
-# nv.db. Running it again replaces what it installed before.
+# marketplace and the permissions; it removes the old nv lines from CLAUDE.md. No root
+# needed. Never touches nv.db. Running it again replaces what it installed before.
 # Other people install the plugin from GitHub: see README.md.
 #
 #   ./install.sh            install
@@ -109,39 +109,35 @@ else
   fi
 fi
 
-# The lines that tell every session that nv exists. They live between two markers, so
-# that installing again replaces them and everything else in the file stays.
+# Earlier versions put lines about nv into CLAUDE.md, between two markers. The plugin's
+# SessionStart hook tells Claude about nv now, so those lines would only say it twice.
 claude_md="$claude_dir/CLAUDE.md"
-snippet="$repo/claude/CLAUDE.snippet.md"
 block_start='# nv:start'
 block_end='# nv:end'
-echo "== nv lines ($block_start … $block_end) -> $claude_md"
-if [[ ! -e "$claude_md" ]]; then
-  run cp "$snippet" "$claude_md"
-elif ! grep -qxF "$block_start" "$claude_md"; then
-  run cp "$claude_md" "$claude_md.before-nv"
-  echo "+ add the nv lines at the end"
-  if ! $dry_run; then
-    { echo; cat "$snippet"; } >> "$claude_md"
+echo "== old nv lines ($block_start ... $block_end) in $claude_md"
+if [[ -e "$claude_md" ]] && grep -qxF "$block_start" "$claude_md"; then
+  if ! grep -qxF "$block_end" "$claude_md"; then
+    echo "error: $claude_md has '$block_start' but no '$block_end'" >&2
+    echo "       remove the broken nv lines yourself, then run again" >&2
+    exit 1
   fi
-elif ! grep -qxF "$block_end" "$claude_md"; then
-  echo "error: $claude_md has '$block_start' but no '$block_end'" >&2
-  echo "       remove the broken nv lines, then run again" >&2
-  exit 1
-elif awk -v from="$block_start" -v to="$block_end" \
-    '$0 == from { inside = 1 } inside { print } $0 == to { inside = 0 }' "$claude_md" |
-    cmp -s - "$snippet"; then
-  echo "already there"
-else
   run cp "$claude_md" "$claude_md.before-nv"
-  echo "+ replace the nv lines"
+  echo "+ remove the nv lines"
   if ! $dry_run; then
-    awk -v from="$block_start" -v to="$block_end" -v snippet="$snippet" '
-      $0 == from { while ((getline line < snippet) > 0) print line; inside = 1 }
-      !inside { print }
-      $0 == to { inside = 0 }
+    # The block, and the one empty line after it, are dropped; everything else stays.
+    awk -v from="$block_start" -v to="$block_end" '
+      $0 == from { inside = 1; next }
+      inside { if ($0 == to) { inside = 0; skipblank = 1 } next }
+      skipblank { skipblank = 0; if ($0 == "") next }
+      { print }
     ' "$claude_md.before-nv" > "$claude_md"
+    if ! grep -q '[^[:space:]]' "$claude_md"; then
+      rm "$claude_md"
+      echo "+ nothing else was in the file: removed it"
+    fi
   fi
+else
+  echo "none found"
 fi
 
 echo

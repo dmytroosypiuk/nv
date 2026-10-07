@@ -330,17 +330,6 @@ fn capture_examples_use_add_and_remove_flags_and_planned() {
     }
 }
 
-#[test]
-fn claude_md_snippet_has_markers_and_names_both_skills() {
-    let snippet = repo_file("claude/CLAUDE.snippet.md");
-
-    assert!(snippet.starts_with("# nv:start\n"), "{snippet}");
-    assert!(snippet.ends_with("# nv:end\n"), "{snippet}");
-    for word in ["nv:capture", "nv:recall", "`nv`"] {
-        assert!(snippet.contains(word), "the snippet does not name {word}");
-    }
-}
-
 /// The skill for developers of nv, in `.claude/skills` (read by Claude Code in this
 /// project). It is not installed: `plugin/skills` holds the skills of the product.
 #[test]

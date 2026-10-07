@@ -1,6 +1,6 @@
 //! `install.sh` (the developer install) puts the binary, the model, the plugin, the
-//! permissions and the CLAUDE.md lines in place, and can be run again without doubling
-//! anything. The `claude` CLI is a stub that writes its arguments to a log.
+//! permissions in place, removes the old CLAUDE.md lines, and can be run again without
+//! doubling anything. The `claude` CLI is a stub that writes its arguments to a log.
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -83,13 +83,11 @@ fn repo_without_build(dir: &Path) -> PathBuf {
     fs::write(model.join("model.onnx"), "not a model").unwrap();
     fs::copy(repo().join("install.sh"), dir.join("install.sh")).unwrap();
     fs::create_dir_all(dir.join("claude")).unwrap();
-    for file in ["CLAUDE.snippet.md", "settings.snippet.json"] {
-        fs::copy(
-            repo().join("claude").join(file),
-            dir.join("claude").join(file),
-        )
-        .unwrap();
-    }
+    fs::copy(
+        repo().join("claude/settings.snippet.json"),
+        dir.join("claude/settings.snippet.json"),
+    )
+    .unwrap();
     dir.join("install.sh")
 }
 
@@ -101,7 +99,8 @@ fn dry_run_changes_nothing_and_names_every_step() {
     for old in ["nv", "nv-recall", "nv-capture"] {
         fs::create_dir_all(target.claude().join("skills").join(old)).unwrap();
     }
-    fs::write(target.claude().join("CLAUDE.md"), "# Mine\n").unwrap();
+    let claude_md = "# Mine\n\n# nv:start\nold text\n# nv:end\n";
+    fs::write(target.claude().join("CLAUDE.md"), claude_md).unwrap();
 
     let output = target.install(&script, &["--dry-run"]);
 
@@ -114,7 +113,7 @@ fn dry_run_changes_nothing_and_names_every_step() {
         "claude plugin install nv@nv-marketplace",
         "Bash(nv:*), Skill(nv:capture), Skill(nv:recall)",
         "CLAUDE.md.before-nv",
-        "nv:start",
+        "old nv lines (# nv:start ... # nv:end)",
         "Dry run: nothing was changed.",
     ] {
         assert!(
@@ -129,8 +128,9 @@ fn dry_run_changes_nothing_and_names_every_step() {
     assert!(!target.dir.path().join("bin").exists());
     assert_eq!(
         fs::read_to_string(target.claude().join("CLAUDE.md")).unwrap(),
-        "# Mine\n"
+        claude_md
     );
+    assert!(!target.claude().join("CLAUDE.md.before-nv").exists());
     // The CLI may be asked what exists; it is not asked to add or install anything.
     let calls = target.claude_calls();
     assert!(!calls.contains("marketplace add"), "{calls}");
@@ -139,16 +139,12 @@ fn dry_run_changes_nothing_and_names_every_step() {
 
 #[test]
 #[ignore = "builds a release binary and needs the model in models/"]
-fn install_twice_keeps_one_nv_block_and_one_of_each_permission() {
+fn install_twice_removes_the_old_nv_block_once_and_keeps_one_of_each_permission() {
     let target = Target::new();
     let claude_md = target.claude().join("CLAUDE.md");
-    let snippet = fs::read_to_string(repo().join("claude/CLAUDE.snippet.md")).unwrap();
-    // An older nv block between the user's own lines, and settings of the user's own.
-    fs::write(
-        &claude_md,
-        "# Mine\nAlways answer briefly.\n\n# nv:start\nold text\n# nv:end\n\n## After\nKeep me.\n",
-    )
-    .unwrap();
+    let original =
+        "# Mine\nAlways answer briefly.\n\n# nv:start\nold text\n# nv:end\n\n## After\nKeep me.\n";
+    fs::write(&claude_md, original).unwrap();
     fs::write(
         target.claude().join("settings.json"),
         r#"{"model": "sonnet", "permissions": {"allow": ["Bash(ls:*)", "Bash(nv:*)"]}}"#,
@@ -162,12 +158,12 @@ fn install_twice_keeps_one_nv_block_and_one_of_each_permission() {
 
     assert_eq!(
         once,
-        format!("# Mine\nAlways answer briefly.\n\n{snippet}\n## After\nKeep me.\n")
+        "# Mine\nAlways answer briefly.\n\n## After\nKeep me.\n"
     );
     assert_eq!(twice, once);
     assert_eq!(
         fs::read_to_string(target.claude().join("CLAUDE.md.before-nv")).unwrap(),
-        "# Mine\nAlways answer briefly.\n\n# nv:start\nold text\n# nv:end\n\n## After\nKeep me.\n"
+        original
     );
     assert!(target.dir.path().join("bin/nv").is_file());
     let settings: serde_json::Value =
@@ -193,7 +189,7 @@ fn install_twice_keeps_one_nv_block_and_one_of_each_permission() {
 
 #[test]
 #[ignore = "builds a release binary and needs the model in models/"]
-fn install_removes_the_old_standalone_skills_and_adds_the_block_to_a_file_without_one() {
+fn install_removes_the_old_standalone_skills_and_leaves_a_claude_md_without_a_block_alone() {
     let target = Target::new();
     for old in ["nv", "nv-recall", "nv-capture"] {
         let folder = target.claude().join("skills").join(old);
@@ -204,7 +200,6 @@ fn install_removes_the_old_standalone_skills_and_adds_the_block_to_a_file_withou
     fs::create_dir_all(&other_skill).unwrap();
     fs::write(other_skill.join("SKILL.md"), "not ours").unwrap();
     fs::write(target.claude().join("CLAUDE.md"), "# Mine\n").unwrap();
-    let snippet = fs::read_to_string(repo().join("claude/CLAUDE.snippet.md")).unwrap();
 
     target.install(&repo().join("install.sh"), &[]);
 
@@ -214,23 +209,22 @@ fn install_removes_the_old_standalone_skills_and_adds_the_block_to_a_file_withou
     assert!(other_skill.join("SKILL.md").is_file());
     assert_eq!(
         fs::read_to_string(target.claude().join("CLAUDE.md")).unwrap(),
-        format!("# Mine\n\n{snippet}")
+        "# Mine\n"
     );
+    assert!(!target.claude().join("CLAUDE.md.before-nv").exists());
 }
 
 #[test]
 #[ignore = "builds a release binary and needs the model in models/"]
-fn install_creates_claude_md_and_settings_when_there_are_none() {
+fn install_creates_settings_and_removes_a_claude_md_that_only_held_the_nv_lines() {
     let target = Target::new();
-    let snippet = fs::read_to_string(repo().join("claude/CLAUDE.snippet.md")).unwrap();
+    let claude_md = target.claude().join("CLAUDE.md");
+    fs::write(&claude_md, "# nv:start\nold text\n# nv:end\n").unwrap();
 
     target.install(&repo().join("install.sh"), &[]);
 
-    assert_eq!(
-        fs::read_to_string(target.claude().join("CLAUDE.md")).unwrap(),
-        snippet
-    );
-    assert!(!target.claude().join("CLAUDE.md.before-nv").exists());
+    assert!(!claude_md.exists());
+    assert!(target.claude().join("CLAUDE.md.before-nv").is_file());
     assert_eq!(
         fs::read_to_string(target.claude().join("settings.json")).unwrap(),
         fs::read_to_string(repo().join("claude/settings.snippet.json")).unwrap()
