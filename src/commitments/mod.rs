@@ -89,6 +89,9 @@ mod tests {
             owner: None,
             planned_for: Some(date("2026-10-07")),
             closed_at: None,
+            replaced_by: None,
+            replaces: vec![],
+            related: vec![],
             created_at: "2026-10-05T09:00:00+02:00".into(),
             updated_at: "2026-10-05T09:00:00+02:00".into(),
         }

@@ -35,6 +35,9 @@ fn note() -> Note {
         owner: None,
         planned_for: None,
         closed_at: None,
+        replaced_by: None,
+        replaces: vec![],
+        related: vec![],
         created_at: "2026-10-06T09:00:00+02:00".into(),
         updated_at: "2026-10-06T09:00:00+02:00".into(),
     }
@@ -386,4 +389,97 @@ fn duplicate_people_on_a_note_are_kept_once() {
         ..NoteChanges::default()
     };
     assert_eq!(note().edited(&changes).unwrap().people, [9]);
+}
+
+// ----- links -----
+
+#[test]
+fn outdated_note_requires_replaced_by_link() {
+    let outdated_without_link = Note {
+        status: NoteStatus::Outdated,
+        ..note()
+    };
+    assert_eq!(
+        outdated_without_link.check_links().unwrap_err(),
+        NoteError::OutdatedWithoutLink { id: 42 }
+    );
+    // And the other way round: a note that was replaced is outdated.
+    let active_with_link = Note {
+        replaced_by: Some(43),
+        ..note()
+    };
+    assert!(active_with_link.check_links().is_err());
+
+    assert!(note().check_links().is_ok());
+    let replaced = note().replaced_by_note(43).unwrap();
+    assert_eq!(
+        replaced,
+        Note {
+            status: NoteStatus::Outdated,
+            replaced_by: Some(43),
+            ..note()
+        }
+    );
+    assert!(replaced.check_links().is_ok());
+}
+
+#[test]
+fn note_can_be_replaced_only_once() {
+    let replaced = note().replaced_by_note(43).unwrap();
+
+    let error = replaced.replaced_by_note(44).unwrap_err();
+
+    assert_eq!(error, NoteError::AlreadyOutdated { id: 42, by: 43 });
+    assert_eq!(
+        error.to_string(),
+        "note #42 is already outdated, replaced by #43"
+    );
+}
+
+#[test]
+fn note_cannot_replace_or_link_to_itself() {
+    assert_eq!(
+        note().replaced_by_note(42).unwrap_err(),
+        NoteError::SelfLink
+    );
+    assert_eq!(note().linked_to(42).unwrap_err(), NoteError::SelfLink);
+    assert_eq!(
+        NoteError::SelfLink.to_string(),
+        "a note can never be linked to itself"
+    );
+    let linked_to_itself = Note {
+        related: vec![42],
+        ..note()
+    };
+    assert_eq!(
+        linked_to_itself.check_links().unwrap_err(),
+        NoteError::SelfLink
+    );
+}
+
+#[test]
+fn linking_twice_changes_nothing() {
+    let once = note().linked_to(5).unwrap();
+    assert_eq!(once.related, [5]);
+
+    let twice = once.linked_to(5).unwrap();
+    assert_eq!(twice, once);
+
+    let more = twice.linked_to(9).unwrap().linked_to(3).unwrap();
+    assert_eq!(more.related, [3, 5, 9]);
+}
+
+#[test]
+fn edit_keeps_links() {
+    let linked = note().linked_to(5).unwrap().replaced_by_note(43).unwrap();
+    let changes = NoteChanges {
+        title: Some("Typo fixed".into()),
+        ..NoteChanges::default()
+    };
+
+    let edited = linked.edited(&changes).unwrap();
+
+    assert_eq!(edited.related, [5]);
+    assert_eq!(edited.replaced_by, Some(43));
+    assert_eq!(edited.status, NoteStatus::Outdated);
 }

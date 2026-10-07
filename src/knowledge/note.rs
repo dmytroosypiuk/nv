@@ -19,6 +19,12 @@ pub enum NoteError {
     IncompleteSource,
     #[error("nothing to change: give at least one field")]
     NothingToChange,
+    #[error("a note can never be linked to itself")]
+    SelfLink,
+    #[error("note #{id} is already outdated, replaced by #{by}")]
+    AlreadyOutdated { id: i64, by: i64 },
+    #[error("note #{id} is outdated but no note replaces it")]
+    OutdatedWithoutLink { id: i64 },
     #[error("only a commitment has {field}: use --type commitment")]
     OnlyCommitments { field: &'static str },
     #[error("a {status} commitment keeps its type")]
@@ -287,6 +293,15 @@ pub struct Note {
     /// When a commitment was done or dropped.
     #[serde(default)]
     pub closed_at: Option<String>,
+    /// The newer note that says what is true now. Set exactly when the note is outdated.
+    #[serde(default)]
+    pub replaced_by: Option<i64>,
+    /// The older notes this note replaced.
+    #[serde(default)]
+    pub replaces: Vec<i64>,
+    /// Related notes; the link has no direction.
+    #[serde(default)]
+    pub related: Vec<i64>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -345,9 +360,54 @@ impl Note {
             owner: fields.owner,
             planned_for: fields.planned_for,
             closed_at: self.closed_at.clone().filter(|_| stays_commitment),
+            replaced_by: self.replaced_by,
+            replaces: self.replaces.clone(),
+            related: self.related.clone(),
             created_at: self.created_at.clone(),
             updated_at: self.updated_at.clone(),
         })
+    }
+}
+
+impl Note {
+    /// This note marked outdated, with the link to the newer note that replaces it.
+    pub fn replaced_by_note(&self, newer_id: i64) -> Result<Note, NoteError> {
+        if newer_id == self.id {
+            return Err(NoteError::SelfLink);
+        }
+        if let Some(by) = self.replaced_by {
+            return Err(NoteError::AlreadyOutdated { id: self.id, by });
+        }
+        Ok(Note {
+            status: NoteStatus::Outdated,
+            replaced_by: Some(newer_id),
+            ..self.clone()
+        })
+    }
+
+    /// This note with a `related` link to another note. Linking twice changes nothing.
+    pub fn linked_to(&self, other_id: i64) -> Result<Note, NoteError> {
+        if other_id == self.id {
+            return Err(NoteError::SelfLink);
+        }
+        let mut linked = self.clone();
+        if !linked.related.contains(&other_id) {
+            linked.related.push(other_id);
+            linked.related.sort_unstable();
+        }
+        Ok(linked)
+    }
+
+    /// An outdated note always has a `replaced_by` link, an active note never has one,
+    /// and no link points to the note itself.
+    pub fn check_links(&self) -> Result<(), NoteError> {
+        if (self.status == NoteStatus::Outdated) != self.replaced_by.is_some() {
+            return Err(NoteError::OutdatedWithoutLink { id: self.id });
+        }
+        if self.replaced_by == Some(self.id) || self.related.contains(&self.id) {
+            return Err(NoteError::SelfLink);
+        }
+        Ok(())
     }
 }
 

@@ -35,6 +35,9 @@ impl<'c> NoteStore<'c> {
             owner: draft.owner,
             planned_for: draft.planned_for,
             closed_at: None,
+            replaced_by: None,
+            replaces: Vec::new(),
+            related: Vec::new(),
             created_at: now.timestamp(),
             updated_at: now.timestamp(),
         };
@@ -120,6 +123,9 @@ impl<'c> NoteStore<'c> {
             owner: row.owner,
             planned_for: row.planned_for.map(|date| date.parse()).transpose()?,
             closed_at: row.closed_at,
+            replaced_by: None,
+            replaces: Vec::new(),
+            related: Vec::new(),
             created_at: row.created_at,
             updated_at: row.updated_at,
         }))

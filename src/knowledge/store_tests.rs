@@ -65,6 +65,9 @@ fn added_note_can_be_read_back_with_repos_and_tickets() {
             owner: None,
             planned_for: None,
             closed_at: None,
+            replaced_by: None,
+            replaces: vec![],
+            related: vec![],
             created_at: MONDAY.into(),
             updated_at: MONDAY.into(),
         }
