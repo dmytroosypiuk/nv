@@ -47,14 +47,22 @@ fn the_release_builds_what_the_fetcher_downloads() {
 }
 
 #[test]
-fn linux_is_built_on_an_old_image_so_that_the_glibc_floor_is_low() {
+fn linux_is_built_on_the_oldest_image_that_can_link_onnx_runtime() {
     let release = file(".github/workflows/release.yml");
 
-    assert!(release.contains("ubuntu-22.04"));
+    // The prebuilt ONNX Runtime needs glibc 2.38 symbols and a GCC 13 libstdc++: on
+    // ubuntu-22.04 the link fails (found by the first CI run, 2026-10-07).
+    assert!(release.contains("ubuntu-24.04"));
+    assert!(
+        !release.contains("ubuntu-22.04"),
+        "ubuntu-22.04 cannot link it"
+    );
     assert!(
         !release.contains("ubuntu-latest"),
         "a new image raises the glibc floor"
     );
+    // The glibc the binary needs is printed in the log of every release.
+    assert!(release.contains("GLIBC_"));
     // macos-14 is Apple silicon; macos-13 and macos-latest may be Intel.
     assert!(release.contains("macos-14"));
     assert!(!release.contains("macos-13") && !release.contains("macos-latest"));
@@ -143,7 +151,7 @@ fn ci_checks_format_lints_and_tests_on_both_platforms() {
         "cargo fmt --check",
         "cargo clippy --all-targets --locked -- -D warnings",
         "cargo test --locked",
-        "ubuntu-22.04",
+        "ubuntu-24.04",
         "macos-14",
         "pull_request",
     ] {

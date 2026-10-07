@@ -51,7 +51,9 @@ exists and when to use the two skills:
 `NV_NO_DOWNLOAD=1` turns even that off (then put the files in place yourself; see
 `plugin/scripts/ensure-nv.sh`).
 
-**Supported:** Linux x86_64 (glibc 2.35 or newer: Ubuntu 22.04, Debian 12, Fedora 36, ...)
+**Supported:** Linux x86_64 with a recent glibc (built on Ubuntu 24.04: expect glibc 2.39 or
+newer, so Ubuntu 24.04, Debian 13, Fedora 40 and newer; the release log prints the exact
+need)
 and macOS on Apple silicon. Not Windows, not Linux arm64: build from source (`cargo build
 --release`, the first build downloads ONNX Runtime once) and use the developer install below.
 

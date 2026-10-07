@@ -8,9 +8,12 @@ name: release
 # A manual run (workflow_dispatch) builds and packs everything and keeps the files as
 # artifacts of the run, but publishes nothing: use it to try this workflow.
 #
-# The Linux build runs on ubuntu-22.04 on purpose: the binary needs the glibc of the
-# machine that built it, so an old image keeps the minimum glibc low (2.35). The Apple
-# silicon build runs on macos-14.
+# The Linux build runs on ubuntu-24.04, the oldest image that can link the prebuilt ONNX
+# Runtime: on Ubuntu 22.04 the link fails (undefined __isoc23_strtol, which needs glibc
+# 2.38, and a GCC 13 std::string function). The binary needs the glibc of the machine that
+# built it, so a newer image than this would raise the minimum glibc for users: pin the
+# version here, never the "latest" alias. The glibc the binary needs is printed in the log
+# (step "glibc needed"). The Apple silicon build runs on macos-14.
 on:
   push:
     tags: ["v*"]
@@ -24,7 +27,7 @@ env:
 
 jobs:
   version:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.read.outputs.version }}
     steps:
@@ -54,7 +57,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-22.04
+          - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
           - os: macos-14
             target: aarch64-apple-darwin
@@ -69,6 +72,10 @@ jobs:
           key: ${{ matrix.target }}
       # ONNX Runtime is downloaded here, at build time, and linked into the binary.
       - run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: glibc needed
+        if: runner.os == 'Linux'
+        run: |
+          objdump -T target/${{ matrix.target }}/release/nv | grep -o 'GLIBC_[0-9.]*' | sort -Vu | tail -n 3
       - name: Pack
         shell: bash
         env:
@@ -83,7 +90,7 @@ jobs:
           path: dist/*
 
   model:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       # The model is downloaded here, at setup time, from Hugging Face.
@@ -103,7 +110,7 @@ jobs:
   publish:
     needs: [version, build, model]
     if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/download-artifact@v4
         with:

@@ -281,3 +281,26 @@ fn the_lock_of_an_installer_that_died_is_taken_over() {
     assert!(world.binary().exists());
     assert!(!lock.exists(), "the lock is released at the end");
 }
+
+#[test]
+fn messages_print_backslashes_as_they_are() {
+    let world = World::new();
+    // On macOS `echo` turns a backslash and c into "stop printing": messages and the
+    // printed path must be written with printf.
+    let odd = world.path("home/a\"b\\c");
+
+    let output = world
+        .command("scripts/ensure-nv.sh")
+        .env("NV_BIN_DIR", &odd)
+        .env("NV_NO_DOWNLOAD", "1")
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(1));
+    // Linux's echo would pass this test too: the real check is the macOS CI job.
+    assert!(
+        text(&output.stderr).contains("a\"b\\c"),
+        "{}",
+        text(&output.stderr)
+    );
+}

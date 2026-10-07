@@ -1,7 +1,7 @@
 name: ci
 
 # Format, lints and the tests (the ones that need the real model are ignored) on both
-# platforms of the release. Linux is built on an old image on purpose: see release.yml.
+# platforms of the release. Linux runs on ubuntu-24.04 on purpose: see release.yml.
 on:
   push:
     branches: [master]
@@ -18,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, macos-14]
+        os: [ubuntu-24.04, macos-14]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4

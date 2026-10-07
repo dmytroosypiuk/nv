@@ -30,7 +30,8 @@ BASE=${NV_RELEASE_BASE:-https://github.com/dmytroosypiuk/nv/releases/download/v$
 want_model=true
 [ "${1:-}" = "--binary" ] && want_model=false
 
-say() { echo "nv: $*" >&2; }
+# printf, not echo: on macOS echo turns a backslash and c in a path into "stop printing".
+say() { printf "nv: %s\n" "$*" >&2; }
 fail() { say "$*"; exit 1; }
 
 # ---- which release file fits this machine
@@ -50,7 +51,7 @@ ready() {
 }
 
 if ready; then
-  echo "$BINARY"
+  printf "%s\n" "$BINARY"
   exit 0
 fi
 
@@ -95,7 +96,7 @@ until mkdir "$LOCK" 2>/dev/null; do
   [ "$waited" -le 900 ] || fail "another install did not finish in 15 minutes: remove $LOCK and try again."
   sleep 1
   if ready; then
-    echo "$BINARY"
+    printf "%s\n" "$BINARY"
     exit 0
   fi
 done
@@ -104,7 +105,7 @@ TMP=$(mktemp -d "${TMPDIR:-/tmp}/nv-install.XXXXXX")
 trap 'rm -rf "$TMP" "$LOCK"' EXIT
 
 if ready; then # the other installer finished first
-  echo "$BINARY"
+  printf "%s\n" "$BINARY"
   exit 0
 fi
 
@@ -152,4 +153,4 @@ for old in "$BIN_DIR"/nv-*; do
 done
 
 say "nv $VERSION is ready"
-echo "$BINARY"
+printf "%s\n" "$BINARY"
