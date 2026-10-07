@@ -151,6 +151,9 @@ for entry in log:
             line = next((l for l in listing.splitlines() if l.startswith(f"- {skill}")), "")
             described = line.startswith(f"- {skill}:")
             print(f"  listing: {skill} {'has a description' if described else 'NAMES ONLY'}")
+# The SessionStart hook of the plugin puts its text into the context of the session.
+hook_text = "save it right away with the" in json.dumps(log)
+print(f"  hook context: {'delivered' if hook_text else 'NOT FOUND in the log'}")
 number = 0
 for entry in log:
     content = entry.get("message", {}).get("content")

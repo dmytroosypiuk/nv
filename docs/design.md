@@ -606,7 +606,7 @@ Design, spike, CLI and the two Claude Code skills are done and installed on the 
 - [x] Write the Claude Code skills: `nv-recall` (when and how to search) and `nv-capture` (when to save, saving rules, template), in `claude/skills/`
 - [x] Install it (`./install.sh`) and run the hand test: by hand with Opus and Haiku, and automated with Haiku in three runs (`docs/skill-test.md`)
 - [x] Package nv as a Claude Code plugin with a marketplace (step 8): layout, launcher and fetcher, SessionStart hook, CI and release workflows, README (all tested locally; nothing has run on GitHub yet)
-- [ ] Try the plugin on this machine: `./install.sh` (removes the old skills and block, installs the plugin from this checkout), then the agentic test with Haiku (`agentic-testing`)
+- [x] Try the plugin on this machine: `./install.sh` and the agentic test with Haiku (2026-10-07: 5 of 5 sessions fine, hook context delivered; see `docs/skill-test.md`)
 - [ ] First GitHub run: a manual `release` workflow run (dry run), then a pre-release tag such as `v0.1.0-rc1` and an install on a second machine
 - [ ] Choose a licence for the public repository (none is set; the plugin manifest has no `license` field)
 - [ ] Build and test on the work laptop's OS; check `nv` is a free command name there
@@ -618,7 +618,7 @@ Skill behaviour with Haiku:
 
 - [ ] `--repo` is left out on every note, also when the user names the service ("billing-api").
 - [ ] `--source-kind` without `--source-ref` is an error (exit 2) and Haiku then drops the source. Options: a clearer message ("give `--source-ref` too, or leave both out"), or allow the kind alone.
-- [ ] The area of "I'll book the exam slot" varies (`learning` in 2 of 3 sessions, `work` in 1). Maybe a rule in `saving-rules.md`: exams, courses and certificates are `learning`.
+- [ ] The area of "I'll book the exam slot" is wrong more often than not (`learning` in 2 of 3 sessions in the third run, `work` in 3 of 3 in the fourth). A rule in `saving-rules.md` and in `SKILL.md`: exams, courses and certificates are `learning`.
 - [ ] Loading on a passing remark is flaky: saved in 4 of 5 sessions, once Haiku loaded `nv-recall`, found nothing and asked for a yes. Not tried: a decision said during a real coding task with file edits.
 - [ ] `nv-recall` questions were only run by hand, with Opus (and once as part of a passing remark with Haiku). Not run through the driver.
 - [ ] Haiku sometimes hides errors with `2>/dev/null` or `2>&1 || true`, and sends several `nv add` in one parallel batch; when the first fails, the rest are cancelled and repeated.

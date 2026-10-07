@@ -208,3 +208,23 @@ Five sessions, all English: four messages ×3, passing remark ×2. The settings 
   reference once (source lost); exam area `work` in one session; "next week" stays
   in the body of the exam note because the day is not known yet; parallel `nv add` calls
   in one batch are cancelled when the first one fails and have to be repeated.
+
+### Fourth automated run (2026-10-07, Haiku, the installed plugin)
+
+The first run against the plugin installed by `./install.sh` (skills `nv:capture` and
+`nv:recall`, the `SessionStart` hook, no `CLAUDE.md` lines). Five sessions: four messages
+×3, passing remark ×2. The driver now also reports whether the hook text reached the
+session.
+
+- **The plugin works the same as the loose skills did:** `nv:capture` loaded on the first
+  message in all three four-message sessions, `nv` ran through the plugin's launcher, no
+  prompt was denied, no `cd`, no stall (0 of 5).
+- **The hook context was delivered in 5 of 5 sessions.** Haiku still saw only the skill
+  names in the listing, so the hook text is its trigger.
+- **Dates right** (`nv date` first; Friday 2026-10-09, tomorrow 2026-10-08, the HR deadline
+  `expires Sat 2026-11-14`); Anna is a commitment with `--owner`; the exam promise was saved
+  at once in 3 of 3; password left out; no invented role.
+- **Passing remark:** one saved (`nv:capture`), one loaded `nv:recall`, found nothing and
+  asked "Would you like me to save it?" (the known flaky case: 5 of 7 saved so far).
+- **Small and still open:** exam promise in area `work` in 3 of 3 (should be `learning`),
+  no `--repo`, one source reference per note written as the model likes.
