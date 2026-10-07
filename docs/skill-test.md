@@ -89,6 +89,8 @@ are in `docs/design.md`, "Decided while splitting the skill (step 7b)".
 
 ### Open issues
 
+The to-do list of the whole project, with these items, is in `docs/design.md`, "Next steps".
+
 - **Loading on a passing remark is flaky:** it saved in 2 of 2 sessions (first run), 0 of 1
   (second run, Haiku loaded `nv-recall`, found nothing and asked for a yes) and 2 of 2
   (third run). The idea "decision said in the middle of a coding task" with a real file

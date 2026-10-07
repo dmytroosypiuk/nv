@@ -577,7 +577,7 @@ CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);  -- schema versio
 
 ## Next steps
 
-Design and the embedding spike are done; next is the CLI, then the Claude Code skill.
+Design, spike, CLI and the two Claude Code skills are done and installed on the dev machine. What is left is below.
 
 - [x] Ubiquitous language: note, note types, commitment, source, area, link, outdated (session 2)
 - [x] Aggregates and rules: Note, Person, Search (session 2)
@@ -587,9 +587,45 @@ Design and the embedding spike are done; next is the CLI, then the Claude Code s
 - [x] Spike: bge-small-en-v1.5 in Rust with fastembed-rs, offline, on 25 real notes (`spikes/embedding/REPORT.md`)
 - [x] Build the CLI: skeleton and schema, notes and change log, embeddings and hybrid search, commitments, people, links, replace, history and undo
 - [x] Write the Claude Code skills: `nv-recall` (when and how to search) and `nv-capture` (when to save, saving rules, template), in `claude/skills/`
-- [ ] Install it (`./install.sh`) and run the hand test in a real session (`docs/skill-test.md`)
+- [x] Install it (`./install.sh`) and run the hand test: by hand with Opus and Haiku, and automated with Haiku in three runs (`docs/skill-test.md`)
 - [ ] Build and test on the work laptop's OS; check `nv` is a free command name there
 - [ ] Check company rules for using Claude Code with project data
+
+**Open issues** (found 2026-10-07; evidence in `docs/skill-test.md`)
+
+Skill behaviour with Haiku:
+
+- [ ] `--repo` is left out on every note, also when the user names the service ("billing-api").
+- [ ] `--source-kind` without `--source-ref` is an error (exit 2) and Haiku then drops the source. Options: a clearer message ("give `--source-ref` too, or leave both out"), or allow the kind alone.
+- [ ] The area of "I'll book the exam slot" varies (`learning` in 2 of 3 sessions, `work` in 1). Maybe a rule in `saving-rules.md`: exams, courses and certificates are `learning`.
+- [ ] Loading on a passing remark is flaky: saved in 4 of 5 sessions, once Haiku loaded `nv-recall`, found nothing and asked for a yes. Not tried: a decision said during a real coding task with file edits.
+- [ ] `nv-recall` questions were only run by hand, with Opus (and once as part of a passing remark with Haiku). Not run through the driver.
+- [ ] Haiku sometimes hides errors with `2>/dev/null` or `2>&1 || true`, and sends several `nv add` in one parallel batch; when the first fails, the rest are cancelled and repeated.
+- [ ] The weekday check was never seen firing in a real session, only in tests.
+- [ ] For Haiku the `~/.claude/CLAUDE.md` lines are the only trigger (the skill listing has names only). A stronger block ("save with the nv-capture skill, not into Claude's own memory") was not tried; one probe session wrote to Claude's auto-memory instead of nv.
+
+CLI gaps:
+
+- [ ] The secret check misses a password without a digit and a password said in other words.
+- [ ] `nv note edit` and `nv note replace` cannot clear a field; there is no unlink command (a wrong link is taken back with undo).
+- [ ] Search `--json` has person IDs but no names.
+- [ ] `NoteStore::restore` is used only by tests: use it or remove it.
+- [ ] `install.sh` has no uninstall; the `# nv:start` markers make one possible.
+
+Install and settings:
+
+- [ ] `install.sh` and `claude/settings.snippet.json` do not add `Skill(nv-capture)`, `Skill(nv-recall)` and `Read(~/.claude/skills/**)`. Dmytro has them in `~/.claude/settings.json`. In default permission mode loading a skill asks, and `cd` into the skill folder asks. Changing the snippet needs the test in `tests/skill.rs` that now expects exactly `Bash(nv:*)`.
+
+Testing tools (`.claude/skills/agentic-testing`):
+
+- [ ] The driver leaves stores in `/tmp/nv-agentic`, session folders in `~/.claude/projects/*work-*` and trust entries for `/tmp/nv-agentic/work/*` in `~/.claude.json`; cleanup is by hand.
+- [ ] The driver cannot approve permission prompts (the auto mode classifier blocks that); the permissions have to be allowed in the settings first.
+
+Project:
+
+- [ ] The temporary company-data rule in `nv-capture` stays until Dmytro has checked his company's rules for AI tools; then he removes it.
+- [ ] Work laptop: `nv` is a free command name; the build and both test runs pass; the background embedder in `src/cli/background.rs` works; search runs offline. Only Linux x86_64 was tested.
+- [ ] The merged branch `step-7-skill` can be deleted, locally and on GitHub.
 
 **Later, not MVP**
 
