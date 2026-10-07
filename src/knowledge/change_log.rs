@@ -14,6 +14,17 @@ word_enum!(
     Action, "action", { Add => "add", Edit => "edit", Delete => "delete", Restore => "restore" }
 );
 
+impl Actor {
+    /// `NV_ACTOR` decides when set; otherwise commands run by Claude Code are Claude's.
+    pub fn from_env(nv_actor: Option<&str>, run_by_claude_code: bool) -> Result<Self> {
+        match nv_actor {
+            Some(word) if !word.is_empty() => Ok(word.parse()?),
+            _ if run_by_claude_code => Ok(Self::Claude),
+            _ => Ok(Self::User),
+        }
+    }
+}
+
 /// One entry of the change log.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Change {
@@ -94,4 +105,26 @@ fn change_from_raw((id, at, actor, action, note_id, before_json): RawChange) -> 
         note_id,
         before,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn actor_is_user_unless_claude_code_runs_the_command() {
+        assert_eq!(Actor::from_env(None, false).unwrap(), Actor::User);
+        assert_eq!(Actor::from_env(None, true).unwrap(), Actor::Claude);
+        assert_eq!(Actor::from_env(Some(""), true).unwrap(), Actor::Claude);
+    }
+
+    #[test]
+    fn nv_actor_env_var_wins() {
+        assert_eq!(Actor::from_env(Some("user"), true).unwrap(), Actor::User);
+        assert_eq!(
+            Actor::from_env(Some("claude"), false).unwrap(),
+            Actor::Claude
+        );
+        assert!(Actor::from_env(Some("robot"), false).is_err());
+    }
 }

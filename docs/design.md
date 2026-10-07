@@ -62,6 +62,15 @@ The spike confirmed the model and fixed how nv runs, stores and ranks (2026-10-0
 - **After fusion, apply database rules:** expired notes are hidden (unless `--all`), and active notes rank above outdated ones.
 - **New search filter `--planned <date>`.** Claude turns relative dates ("tomorrow", "next week") into real dates before calling nv. The spike's only miss ("what did I promise to do tomorrow") is a filter question, not a vector question.
 
+**Decided while building notes and keyword search (step 2)**
+
+- **Actor:** the change log records `claude` or `user`. `NV_ACTOR` decides when set; otherwise it is `claude` when `CLAUDECODE=1` (set by Claude Code for the commands it runs), else `user`.
+- **Time:** `main` reads the clock once and passes it down. Times are stored as local time with offset (`2026-10-07T09:00:00+02:00`), so the date shown is the date the user lived. A hidden `NV_NOW` env var fixes the clock in tests.
+- **Keyword query:** the words of the query are quoted and joined with OR, ranked by BM25 with the title weighted 5× the body. FTS5 uses the `porter` tokenizer, so "retries" finds "retry".
+- **A note ID is never reused** (`AUTOINCREMENT`), so a deleted note can always come back under its old ID.
+- **Change log:** `add` is logged too (no previous state). Delete removes the row; the whole note, with repos and tickets, stays in `before_json`.
+- **Commitment status starts as `todo`** as soon as a note has type `commitment`, also when an edit changes the type.
+
 **Build**
 
 - **Pin exact versions** in `Cargo.lock`: `ort` is still a release candidate.
@@ -250,7 +259,8 @@ Claude saves a note only if Dmytro will be glad to find it in a month and it is 
 | The lesson, not the story: "Library X does not support streaming" | Personal things mentioned in passing; personal notes only when asked |
 
 - **Secrets:** save how to get access instead, for example "ask DevOps in #infra-help".
-- **Safety net:** `nv add` checks the text for things that look like secrets (`ghp_…`, `sk-…`, `password=…`, long random strings) and refuses to save them.
+- **Safety net:** `nv add` and `nv note edit` check title, body, project and source reference for things that look like secrets (`ghp_…`, `sk-…`, `password=…`, private keys, long random strings) and refuse to save them. There is no override flag, and the error never repeats the secret.
+- **Not secrets:** hex-only strings (commit SHAs, UUIDs), placeholders (`password=$DB_PASSWORD`, `token=<your token>`) and plain prose ("Password: ask Anna"). A long random string is 32+ characters with lowercase, uppercase and at least three digits.
 - **Time-limited facts** get an expiry date, for example "Anna on vacation next week" expires the day after. Expired notes are hidden from search; `nv search --all` still finds them.
 - **No expiry** when no end date is known; the note is replaced when the situation changes.
 
@@ -328,11 +338,20 @@ EOF
 ```
 #42  decision · work · 2026-10-06 · active
      Retry 5 times for billing-api
-     repos: billing-api · ticket: PAY-1234 · people: Anna Nowak
+     project: Billing · repos: billing-api · tickets: PAY-1234 · people: Anna Nowak
 
 #17  decision · work · 2026-09-12 · outdated → #42
      Retry 3 times
 ```
+
+- A note with no type shows `note`. A commitment shows `todo`, `done` or `dropped` in place of `active`.
+- The details line holds project, repos, tickets, people and source, only those that are set.
+- `nv note show` prints the same lines, then an empty line and the body.
+- `nv add` answers `Saved #42` (`Edited #42`, `Deleted #42`); with `--json`, the whole note.
+- No results: `No notes found.` Search `--json` is a list of notes, each with its `rank`.
+- Exit codes: 0 ok, 1 nv refused or failed (not found, broken rule, secret), 2 wrong usage.
+
+**Edit:** each flag replaces that field; `--repo` and `--ticket` replace the whole list. The body changes only with `--body`, which reads the new body from stdin.
 
 **Search filters**, all combinable: `--area`, `--type`, `--repo`, `--ticket`, `--person <id>`, `--since <date>`, `--planned <date>` (commitments planned for that date), `--all` (include expired), `--limit` (default 5). A search with only filters and no text is allowed, for example `nv search --ticket PAY-1234`; it does not load the model.
 
@@ -345,7 +364,7 @@ This schema follows the three contexts and the aggregate rules from session 2.
 ```sql
 -- Knowledge: every note, commitments included
 CREATE TABLE notes (
-  id          INTEGER PRIMARY KEY,
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,  -- an ID is never reused
   title       TEXT NOT NULL,
   body        TEXT NOT NULL,
   area        TEXT NOT NULL CHECK (area IN ('work','learning','personal')),
@@ -394,13 +413,15 @@ CREATE TABLE embeddings (
   text_hash TEXT NOT NULL,        -- re-embed when the text changes
   PRIMARY KEY (note_id, model)
 );
-CREATE VIRTUAL TABLE notes_fts USING fts5(title, body, content='notes', content_rowid='id');
+CREATE VIRTUAL TABLE notes_fts USING fts5(title, body, content='notes', content_rowid='id',
+  tokenize='porter unicode61');   -- kept in step with notes by triggers (migration 0002)
 
 -- Shared
 CREATE TABLE change_log (
   id INTEGER PRIMARY KEY, at TEXT NOT NULL,   -- injected, no SQL default
   actor TEXT NOT NULL,            -- 'claude' or 'user'
-  action TEXT NOT NULL, note_id INTEGER NOT NULL,
+  action TEXT NOT NULL,           -- 'add', 'edit', 'delete', 'restore'
+  note_id INTEGER NOT NULL,
   before_json TEXT                -- old state, used by undo
 );
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);  -- schema version, active model
