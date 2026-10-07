@@ -3,10 +3,11 @@
 Four real situations from `docs/design.md`. Say each one to Claude Code in a fresh session
 (after `./install.sh`), in any language, then check what was saved.
 
-`./install.sh` puts two skills into `~/.claude/skills`: `nv-capture` (saving) and
-`nv-recall` (searching), and the nv lines between `# nv:start` and `# nv:end` into
-`~/.claude/CLAUDE.md`. Those lines are what should make a session save without being
-asked. For each situation, also note which skill loaded, and whether it loaded at all.
+The skills are in the plugin `nv` (skills `nv:capture`, saving, and `nv:recall`, searching).
+`./install.sh` installs it from this checkout; other people install it from GitHub (README).
+The `SessionStart` hook of the plugin gives Claude the lines that should make a session save
+without being asked. For each situation, also note which skill loaded, and whether it loaded
+at all.
 
 To run this without doing it by hand, use the project skill `agentic-testing`
 (`.claude/skills/agentic-testing`): a script drives real Claude sessions and reports what
@@ -109,7 +110,7 @@ The to-do list of the whole project, with these items, is in `docs/design.md`, "
   one): "exam" is ambiguous.
 - **A password without a digit**, or said in other words, still passes the secret check.
 - **`nv note edit` and `nv note replace` cannot clear a field**; there is no unlink.
-- **The company-data rule in `nv-capture` is temporary**: Dmytro removes it when the
+- **The company-data rule in `nv:capture` is temporary**: Dmytro removes it when the
   company rules for AI tools are checked.
 - **Work laptop:** build, both test runs, the background embedder and offline search are
   only tested on Linux x86_64.

@@ -21,9 +21,10 @@ Does it write good notes with `nv`? A unit test cannot answer this. A model has 
 1. **Never use the real store.** The driver sets `NV_HOME=/tmp/nv-agentic/store/<name>`
    for each run and copies the model into it. Check the real store is untouched at the end:
    `nv history` in `~/.nv` must show only what the user saved.
-2. **The skills are installed.** `./install.sh --dry-run` first, then `./install.sh`, with
-   the user's word. After a change to a skill, install again: the test reads
-   the installed plugin, not the repo.
+2. **The plugin is installed.** `./install.sh --dry-run` first, then `./install.sh`, with
+   the user's word (`claude plugin list` shows `nv@nv-marketplace`). After a change to a
+   skill or to a script of the plugin, install again: the test reads the installed
+   plugin, not the repo.
 3. **Permission prompts.** In the default permission mode, loading a skill asks the user.
    The user runs in auto mode and does not see it. A test session stops at that prompt.
    Ask the user to add `Skill(nv:capture)` and `Skill(nv:recall)` to `permissions.allow`

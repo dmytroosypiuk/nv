@@ -130,7 +130,7 @@ The spike confirmed the model and fixed how nv runs, stores and ranks (2026-10-0
 - **No SessionStart hook.** `nv today` runs when the user asks what is planned or what others owe them, or when the user runs it. Nothing runs it automatically.
 - **The skill** was one file, `claude/skills/nv/SKILL.md`; step 7b split it in two. `tests/skill.rs` checks that every command and flag in the skills exists in the CLI.
 - **Permission:** `Bash(nv:*)` in `~/.claude/settings.json`; the snippet is `claude/settings.snippet.json`.
-- **Install:** `./install.sh` (per user, no root, `--dry-run`): binary to `~/.local/bin`, model to `~/.nv/models`, the skills to `~/.claude/skills`, permission merged into the settings. It refuses when another `nv` is on the PATH.
+- **Install:** `./install.sh` (per user, no root, `--dry-run`): binary to `~/.local/bin`, model to `~/.nv/models`, the skills to `~/.claude/skills`, permission merged into the settings. It refuses when another `nv` is on the PATH. *Since step 8 this is the developer install; other people install the plugin.*
 - **Hand test:** `docs/skill-test.md`.
 
 **Decided while splitting the skill (step 7b)**
@@ -139,7 +139,7 @@ A review of the first skill found that it would often not load for unprompted sa
 
 - **Two skills instead of one.** `nv-recall` (search before answering) and `nv-capture` (save the moment something comes up), each with a short description in ASD-STE100 Simplified Technical English: one sentence that says what to do, then "Use when …" with a short list of plain nouns (a decision, a promise, a person), so that small models (Haiku) read them correctly too. Each `SKILL.md` is short; the long parts are files in the same folder (`cli-read.md`; `saving-rules.md`, `template.md`, `cli-write.md`). The small shared rules (people by ID, English only, real dates) are written in both, not linked across skills.
 - **`allowed-tools: Bash(nv *)`** in the frontmatter of both skills. `Bash(nv:*)` stays in `settings.json` too, for nv commands run while no skill is loaded.
-- **Always-loaded lines in `~/.claude/CLAUDE.md`.** A skill description alone is a weak trigger when the user is not asking for anything. `install.sh` writes the text of `claude/CLAUDE.snippet.md` between the markers `# nv:start` and `# nv:end`: a second install replaces the block, everything else in the file stays, and the file is copied to `CLAUDE.md.before-nv` first. This is not a hook: still nothing runs nv automatically.
+- **Always-loaded lines in `~/.claude/CLAUDE.md`.** A skill description alone is a weak trigger when the user is not asking for anything. `install.sh` writes the text of `claude/CLAUDE.snippet.md` between the markers `# nv:start` and `# nv:end`: a second install replaces the block, everything else in the file stays, and the file is copied to `CLAUDE.md.before-nv` first. This is not a hook: still nothing runs nv automatically. *Since step 8 a plugin `SessionStart` hook injects them, and `install.sh` removes the block.*
 - **Install** copies both skill folders (replacing them) and removes the old `skills/nv`. There is no uninstall command yet; the markers make one possible.
 - **Temporary company-data rule** in `nv-capture`: no customer data, internal hostnames, URLs or IPs, code from company repos or financial figures in work notes until Dmytro has checked his company's rules for AI tools. Dmytro removes it.
 - **Replace copies fields.** `nv note replace <old-id>` needs only `--title` and the body. Area, type, project, repos, tickets, people and source come from the old note; a flag overrides its field, and a list flag replaces the whole copied list. A commitment that stays a commitment also keeps its owner and planned date (otherwise replacing Anna's commitment would silently make it mine) and starts as `todo` again. `expires_on` is never copied: what is true now has its own end. Before, a replace with only a title lost the ticket, and `nv search --ticket` found only the outdated note.
@@ -164,6 +164,23 @@ A review of the first skill found that it would often not load for unprompted sa
 - **Third automated run (Haiku, English only):** 5 of 5 sessions ran to the end, with correct dates through `nv date`, the exam promise saved at once (save first, ask after), no `cd`, no denied prompt. Details in `docs/skill-test.md`.
 - **The today hint** names the status: `nv search --type commitment --status todo`.
 - **A password told in a sentence is refused:** `password`, `passwd` or `pwd`, then `is`, then a value of 6 or more characters with a letter and a digit that is not a placeholder or a path. "The staging password is hunter2" is refused; "the password is stored in Vault" and "pwd is /home/anna2" pass. A password without a digit still passes: the check is a safety net, and the skill says so.
+
+**Decided while packaging as a plugin (step 8)**
+
+Why: other machines (a work laptop first) must get nv without a checkout, fully automated. Claude Code has plugins and marketplaces; a marketplace is a git repository with `.claude-plugin/marketplace.json`. Facts from the plugin docs that shaped this: a plugin can ship skills, hooks and a `bin/` folder (on the PATH of Claude's Bash tool); it cannot ship `CLAUDE.md` text and cannot add permission rules; `CLAUDE_PLUGIN_ROOT` and `CLAUDE_PLUGIN_DATA` are not set for commands Claude runs, only for hooks.
+
+- **This repository is the marketplace and holds the plugin.** `.claude-plugin/marketplace.json` (name `nv-marketplace`, one plugin `nv`, source `./plugin`); the plugin is in `plugin/`: `.claude-plugin/plugin.json`, `VERSION`, `skills/`, `bin/nv`, `hooks/hooks.json`, `scripts/`. Install: `claude plugin marketplace add dmytroosypiuk/nv` and `claude plugin install nv@nv-marketplace`, or the two settings keys `extraKnownMarketplaces` and `enabledPlugins`. `claude plugin validate` passes for both (an ignored test).
+- **The skills are `nv:capture` and `nv:recall`** (plugin name, colon, skill name). They moved from `claude/skills/nv-capture` and `nv-recall` to `plugin/skills/capture` and `recall`; one source for the skills, no copy step. Texts and tests follow.
+- **Platforms of the first release:** Linux x86_64 and macOS Apple silicon. Not Windows, not Linux arm64: build from source.
+- **A `SessionStart` hook replaces the `# nv:start` lines in `~/.claude/CLAUDE.md`.** A plugin cannot ship `CLAUDE.md` text, and for Haiku those lines were the only trigger (the skill listing has names only). The hook (`plugin/hooks/hooks.json`, matcher `startup|resume|clear|compact`, timeout 600 s) runs `scripts/session-start.sh`, which prints `scripts/context.txt` as `additionalContext`: the same text as before with the skill names `nv:capture` and `nv:recall`. This reverses the old "no SessionStart hook" decision in one way only: the hook adds text and checks the install; it never runs `nv today`. The extra sentence "do not save these to Claude's own memory files" is not added: it waits for Dmytro's word.
+- **The hook never fails a session.** It always exits 0 and prints one JSON document. When nv cannot be installed, the context says so ("nv is not installed ... Tell the user once, in one short line ... Reason: ...") and Claude goes on without nv.
+- **The fetcher (`plugin/scripts/ensure-nv.sh`) is the only code that uses the network**, at setup time, once per version: it downloads `nv-<version>-<target>.tar.gz` and `model-bge-small-en-v1.5.tar.gz` and `SHA256SUMS` from the GitHub release `v<version>` (override `NV_RELEASE_BASE`, any URL curl reads), checks every SHA-256, and installs atomically under a lock (two sessions, or the hook and the launcher, download once; a dead installer's lock is taken over). Binary: `~/.nv/bin/nv-<version>` (override `NV_BIN_DIR`); model: `$NV_HOME/models/bge-small-en-v1.5`. Older binaries are removed. `NV_NO_DOWNLOAD=1` never downloads and says what is missing. stdout is the binary path, everything else stderr. POSIX sh, so it runs under macOS's `/bin/sh`.
+- **The launcher (`plugin/bin/nv`)** is the `nv` command on Claude's PATH: it fetches only the binary if it is missing and then `exec`s it (arguments, stdin and exit code pass through). The model is the hook's job; without it nv says so and searches by keyword only. The launcher is the fallback when the hook did not run or failed.
+- **The offline rule is unchanged:** the `nv` binary never touches the network. Downloads are setup (the scripts), ONNX Runtime at build time, the model in CI.
+- **Release (`.github/workflows/release.yml`):** a tag `v<version>` must equal the version in `Cargo.toml`, `plugin/VERSION` and `plugin.json` (a test keeps the files equal; the job checks the tag). It builds `x86_64-unknown-linux-gnu` on `ubuntu-22.04` (the binary needs the glibc of the machine that built it, so an old image keeps the floor at 2.35) and `aarch64-apple-darwin` on `macos-14`, packs the model after checking it against `spikes/embedding/model.sha256` (pinned, so a changed upstream model fails the release), writes `SHA256SUMS`, and publishes the release (a pre-release when the version has a dash). A manual run is a dry run: it builds and keeps artifacts, publishes nothing. `.github/workflows/ci.yml` runs fmt, clippy and the tests on both platforms. `tests/release.rs` keeps the workflows and the fetcher in agreement about names and targets.
+- **Permissions cannot ship with a plugin,** so they are in the README (and `claude/settings.snippet.json`): `Bash(nv:*)`, `Skill(nv:capture)`, `Skill(nv:recall)`.
+- **`install.sh` is the developer install** from a checkout: build, binary and model, the plugin from this folder as a local marketplace (`claude plugin marketplace add/update`, `install/update`), the three permissions merged into `settings.json` (backup `settings.json.before-nv`), and it removes the old standalone `~/.claude/skills/nv-*` and the old `# nv:start` block (backup `CLAUDE.md.before-nv`; a `CLAUDE.md` that held only that block is removed).
+- **Not done yet:** nothing has run on GitHub (no tag, no workflow run), the macOS build was never run by anyone, and the plugin was not installed into the real `~/.claude` of this machine (step 6 waits for Dmytro's word).
 
 **Build**
 
@@ -588,6 +605,10 @@ Design, spike, CLI and the two Claude Code skills are done and installed on the 
 - [x] Build the CLI: skeleton and schema, notes and change log, embeddings and hybrid search, commitments, people, links, replace, history and undo
 - [x] Write the Claude Code skills: `nv-recall` (when and how to search) and `nv-capture` (when to save, saving rules, template), in `claude/skills/`
 - [x] Install it (`./install.sh`) and run the hand test: by hand with Opus and Haiku, and automated with Haiku in three runs (`docs/skill-test.md`)
+- [x] Package nv as a Claude Code plugin with a marketplace (step 8): layout, launcher and fetcher, SessionStart hook, CI and release workflows, README (all tested locally; nothing has run on GitHub yet)
+- [ ] Try the plugin on this machine: `./install.sh` (removes the old skills and block, installs the plugin from this checkout), then the agentic test with Haiku (`agentic-testing`)
+- [ ] First GitHub run: a manual `release` workflow run (dry run), then a pre-release tag such as `v0.1.0-rc1` and an install on a second machine
+- [ ] Choose a licence for the public repository (none is set; the plugin manifest has no `license` field)
 - [ ] Build and test on the work laptop's OS; check `nv` is a free command name there
 - [ ] Check company rules for using Claude Code with project data
 
@@ -614,7 +635,7 @@ CLI gaps:
 
 Install and settings:
 
-- [ ] `install.sh` and `claude/settings.snippet.json` do not add `Skill(nv-capture)`, `Skill(nv-recall)` and `Read(~/.claude/skills/**)`. Dmytro has them in `~/.claude/settings.json`. In default permission mode loading a skill asks, and `cd` into the skill folder asks. Changing the snippet needs the test in `tests/skill.rs` that now expects exactly `Bash(nv:*)`.
+- [ ] Plugin skills in the default permission mode were not tried: `Skill(nv:capture)` may still ask, and `cd` into the plugin cache may need `Read(~/.claude/plugins/**)`. The README snippet and `install.sh` carry `Bash(nv:*)`, `Skill(nv:capture)` and `Skill(nv:recall)`.
 
 Testing tools (`.claude/skills/agentic-testing`):
 
