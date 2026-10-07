@@ -148,7 +148,10 @@ A review of the first skill found that it would often not load for unprompted sa
 - **`nv note edit --planned <date>`** moves the planned date of a `todo` commitment and is logged as `edit`. A done or dropped commitment keeps its date. `nv commitment postpone` stays, with its own log action.
 - **New search filters:** `--status todo|done|dropped` (it matches the commitment status, so it returns commitments only) and `--project <name>` (the whole name, in any case).
 - **"showing 5 of 7, use --limit"** is the last line of a filter-only search that the limit cut. A text search has no such line: it ranks every candidate and has no cut-off, so a total would mean nothing. `--json` stays a plain list.
-- **Search results show the first line of the body** (the first line that is not empty, cut at 100 characters with `…`) between the title and the details, so Claude does not need `nv note show` for every result. `nv note show` is unchanged.
+- **Search results show the start of the body** (cut at 100 characters with `…`) between the title and the details, so Claude does not need `nv note show` for every result. `nv note show` is unchanged.
+- **Answers name the weekday.** `Saved #43, planned Thu 2026-10-08`, `Saved #44, expires Sat 2026-11-14`, `Edited #43, planned …`, `Saved #45, replaces #43, planned …`, `Postponed #43 to Mon 2026-10-12`. In the hand test Haiku saved the right date but told the user "Wed 2026-10-08": a small model cannot be trusted to work out a weekday, so nv prints it and the skill says to copy it.
+- **The start of the body in search results is the first paragraph joined into one line**, cut at 100 characters. Bodies are wrapped at about 88 characters, so one line stopped in the middle of a sentence.
+- **`nv-capture/SKILL.md` must be enough alone.** Haiku did not read the linked files: it tried `--type root-cause` and `--type deadline`, put an HR deadline in area `personal` without source or expiry, and copied "(was 3)" from the skill's example into a note. So the areas, the five types, source and expiry are listed in `SKILL.md` itself, with the rules "write only what the user said" and "never copy facts from an example", and the main example is about a different topic than the hand test. `tests/skill.rs` checks this.
 - **The today hint** names the status: `nv search --type commitment --status todo`.
 - **A password told in a sentence is refused:** `password`, `passwd` or `pwd`, then `is`, then a value of 6 or more characters with a letter and a digit that is not a placeholder or a path. "The staging password is hunter2" is refused; "the password is stored in Vault" and "pwd is /home/anna2" pass. A password without a digit still passes: the check is a safety net, and the skill says so.
 
@@ -384,7 +387,7 @@ nv note search "<query>" [filters]
 nv commitment today                # two lists, see below
 nv commitment done <id>            # "Done #12"
 nv commitment drop <id>            # "Dropped #12"
-nv commitment postpone <id> <date> # "Postponed #12 to 2026-10-09"; also sets a first date
+nv commitment postpone <id> <date> # "Postponed #12 to Fri 2026-10-09"; also sets a first date
 
 nv people add "<name>" [--role R] [--alias A]...
 nv people edit <id> [--name N] [--role R]
@@ -460,7 +463,7 @@ History:
 - The details line holds owner, planned date, project, repos, tickets, people, source, expiry date, `replaces: #17` and `related: #5, #9`, only those that are set. A commitment of mine shows no owner.
 - A search result shows the first line of the body under the title, cut at 100 characters. `nv note show` prints the header, title and details, then an empty line and the whole body.
 - `showing 2 of 7, use --limit` ends a search with only filters when there are more notes than the limit. A text search never has this line.
-- `nv add` answers `Saved #42` (`Edited #42`, `Deleted #42`); with `--json`, the whole note.
+- `nv add` answers `Saved #42` (`Edited #42`, `Deleted #42`), followed by `, planned Thu 2026-10-08` and `, expires Sat 2026-11-14` when the note has those dates; with `--json`, the whole note.
 - No results: `No notes found.` Search `--json` is a list of notes, each with its `rank`.
 - Exit codes: 0 ok, 1 nv refused or failed (not found, broken rule, secret), 2 wrong usage.
 

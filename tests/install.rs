@@ -43,6 +43,7 @@ impl Target {
             .env("NV_BIN_DIR", self.dir.path().join("bin"))
             .env("NV_HOME", self.dir.path().join("nv-home"))
             .env("CLAUDE_CONFIG_DIR", self.claude())
+            .env("PATH", path_without_nv())
             .output()
             .unwrap();
         assert!(
@@ -53,6 +54,14 @@ impl Target {
         );
         output
     }
+}
+
+/// The PATH without the folders that hold an installed `nv`: the script refuses to
+/// install next to another nv, and the test must not depend on this machine.
+fn path_without_nv() -> std::ffi::OsString {
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    let kept = std::env::split_paths(&path).filter(|dir| !dir.join("nv").exists());
+    std::env::join_paths(kept).unwrap()
 }
 
 /// A copy of what the script reads from the repo, with an empty file for the model, so a

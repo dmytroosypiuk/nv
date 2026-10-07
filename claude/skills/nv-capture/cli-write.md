@@ -1,7 +1,10 @@
 # nv write commands
 
 Every change goes to the change log, so `nv history undo` can take it back. Answers are
-one line: `Saved #42`, `Edited #42`, `Deleted #42`, `Saved #43, replaces #42`.
+one line: `Saved #42`, `Edited #42`, `Deleted #42`, `Saved #43, replaces #42`. A planned
+or expiry date is in the answer with its weekday: `Saved #43, planned Thu 2026-10-08`,
+`Saved #44, expires Sat 2026-11-14`, `Postponed #43 to Mon 2026-10-12`. Check that
+weekday against what the user said.
 
 ## Add
 

@@ -407,7 +407,8 @@ pub fn run(cli: Cli, context: &mut Context<'_>, streams: Streams<'_>) -> Result<
             let as_json = args.json;
             let note = store.add(&draft(args, stdin)?, actor, &now)?;
             embed_in_background(context);
-            output::change(out, "Saved", &note, as_json)
+            let saved = format!("Saved #{}{}", note.id, output::dates(&note));
+            output::change(out, &saved, &note, as_json)
         }
         Command::Note(NoteCommand::Replace(args)) => {
             let as_json = args.json;
@@ -427,12 +428,13 @@ pub fn run(cli: Cli, context: &mut Context<'_>, streams: Streams<'_>) -> Result<
             };
             let note = store.replace_copying(args.old_id, newer, actor, &now)?;
             embed_in_background(context);
-            if as_json {
-                output::json(out, &note)
-            } else {
-                writeln!(out, "Saved #{}, replaces #{}", note.id, args.old_id)?;
-                Ok(())
-            }
+            let saved = format!(
+                "Saved #{}, replaces #{}{}",
+                note.id,
+                args.old_id,
+                output::dates(&note)
+            );
+            output::change(out, &saved, &note, as_json)
         }
         Command::Note(NoteCommand::Link { id, other_id }) => {
             if store.link(id, other_id, actor, &now)? {
@@ -475,11 +477,12 @@ pub fn run(cli: Cli, context: &mut Context<'_>, streams: Streams<'_>) -> Result<
             };
             let note = store.edit(args.id, &changes, actor, &now)?;
             embed_in_background(context);
-            output::change(out, "Edited", &note, args.json)
+            let edited = format!("Edited #{}{}", note.id, output::dates(&note));
+            output::change(out, &edited, &note, args.json)
         }
         Command::Note(NoteCommand::Delete(args)) => {
             let note = store.delete(args.id, actor, &now)?;
-            output::change(out, "Deleted", &note, args.json)
+            output::change(out, &format!("Deleted #{}", note.id), &note, args.json)
         }
         Command::Search(args) | Command::Note(NoteCommand::Search(args)) => {
             let request = SearchRequest {
@@ -545,7 +548,7 @@ pub fn run(cli: Cli, context: &mut Context<'_>, streams: Streams<'_>) -> Result<
             store.change(id, Action::Postpone, actor, &now, |note| {
                 Ok(postpone(note, date)?)
             })?;
-            writeln!(out, "Postponed #{id} to {date}")?;
+            writeln!(out, "Postponed #{id} to {}", date.with_weekday())?;
             Ok(())
         }
         Command::History {

@@ -16,9 +16,11 @@ If you do not save a decision or a passing "I'll do it", it is lost.
 2. **Save right away.** Ask about missing facts, never about whether to save. If the note
    needs a detail you do not have (which Anna, which date, which repo), ask that one
    question; a note with a guess in it is worse.
-3. **Confirm in one line**, with the weekday for any date: "Saved to nv: #42 Retry count
-   for billing-api is 5" or "Saved to nv: #43 Send retry numbers to Anna,
-   planned for Fri 2026-10-09". The user catches a wrong date there.
+3. **Confirm in one line**, with the weekday for any date: "Saved to nv: #42 Use
+   PostgreSQL 16 for reporting" or "Saved to nv: #43 Send retry numbers to Anna,
+   planned for Fri 2026-10-09". nv prints the weekday (`Saved #43, planned Fri
+   2026-10-09`). Copy the weekday from the answer of nv; do not calculate it. If the
+   weekday is not the one the user said, the date is wrong: correct it.
 
 Save when the user will be glad to find it in a month and it is hard to find anywhere
 else: decisions, commitments, ideas, root causes, people's availability and roles, setup
@@ -32,23 +34,36 @@ Fields are flags. The body comes from stdin; always use a quoted heredoc (`<<'EO
 code, quotes and `$` arrive unchanged.
 
 ```
-nv search "retry count billing-api"
-nv add --title "Retry count for billing-api is 5" --area work --type decision \
-  --repo billing-api --ticket PAY-1234 --person 7 \
-  --source-kind meeting --source-ref "Sprint planning, 2026-10-06" <<'EOF'
-Retry count for billing-api calls is 5 (was 3), agreed with Anna Nowak because of
-timeouts in PAY-1234. Code: `retry(max = 5)` in src/client.rs.
+nv search "database version reporting service"
+nv add --title "Use PostgreSQL 16 for the reporting service" --area work --type decision \
+  --repo reporting --ticket REP-88 --person 7 \
+  --source-kind meeting --source-ref "Architecture review, 2026-10-06" <<'EOF'
+The reporting service uses PostgreSQL 16, agreed with Piotr Zielinski at the
+architecture review on 2026-10-06, because version 14 has no support after 2026-11.
 EOF
 ```
 
+- `--title`, `--area` and the body are required. Use the other flags only when the user
+  gave that fact.
+- `--area` is one of: `work` (job, team, tickets, HR, also HR emails), `learning`
+  (general knowledge), `personal` (own life, side projects).
+- `--type` is one of these five words, no others: `decision` (something was decided),
+  `commitment` (someone promised an action), `how-to` (steps to do something), `fact`
+  (true, no action; a root cause, a deadline, a person's role), `idea` (a maybe).
+- `--repo`, `--ticket`, `--project`, `--person <id>`: when the user named them.
+- `--source-kind` with `--source-ref`: where it came from. Kinds: `meeting`, `chat`,
+  `email`, `ticket`, `web`, `repo`, `doc`.
+- `--expires-on <date>`: for a fact with a deadline or an end, the last day it is true.
+- **Write only what the user said.** Do not add a number, a role, a repo or a cause that
+  the user did not give. The examples here show the form.
+  Never copy facts from an example.
 - **The body must make sense alone**, without this conversation, with the names, numbers,
-  paths, versions and dates.
+  paths, versions and dates the user gave.
 - **Write in English**, also when the user speaks Ukrainian or Polish. The search model
   is English only.
 - **Turn relative dates into real dates.** "Tomorrow" and "Friday" become `2026-10-08`,
   from today's date in your context, in the text and in every date flag.
-- `--title`, `--area` (`work`, `learning`, `personal`) and the body are required. All
-  fields, the types and good examples are in [template.md](template.md).
+- More examples of good notes are in [template.md](template.md).
 
 ## Secrets
 
@@ -61,7 +76,8 @@ job. Save how to get access instead: "Staging database password: ask DevOps in
 
 People are addressed by ID: a name is not unique. Before `--person` or `--owner`, run
 `nv people search "anna"`. One match that fits: use that ID. Several, and the context
-does not decide: ask. No match: `nv people add "Anna Nowak" --role "QA lead"`.
+does not decide: ask. No match: `nv people add "Anna Nowak" --role "QA lead"`, with the
+role only when the user said it.
 
 ## Commitments
 

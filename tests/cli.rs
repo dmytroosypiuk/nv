@@ -353,7 +353,7 @@ fn search_output_matches_golden_text() {
 
 #1  decision · work · 2026-10-05 · active
     Retry 5 times
-    We agreed with Anna to use 5 retries.
+    We agreed with Anna to use 5 retries. Code: `retry(max = 5)`
     project: Billing · repos: billing-api · tickets: PAY-1234 · source: meeting, Sprint planning
 
 #3  note · learning · 2026-10-06 · active
@@ -800,7 +800,7 @@ fn postpone_moves_commitment_out_of_today() {
         .args(["commitment", "postpone", "1", "2026-10-09"])
         .assert()
         .success()
-        .stdout("Postponed #1 to 2026-10-09\n");
+        .stdout("Postponed #1 to Fri 2026-10-09\n");
 
     nv_on_wednesday(&nv_home)
         .arg("today")
@@ -1598,7 +1598,7 @@ fn edit_planned_is_logged_as_edit() {
         .args(["note", "edit", "1", "--planned", "2026-10-12"])
         .assert()
         .success()
-        .stdout("Edited #1\n");
+        .stdout("Edited #1, planned Mon 2026-10-12\n");
 
     let note = stdout_json(nv(&nv_home).args(["note", "show", "1", "--json"]));
     assert_eq!(note["planned_for"], "2026-10-12");
@@ -1870,4 +1870,66 @@ fn add_refuses_password_written_in_a_sentence() {
         .code(1)
         .stderr(predicate::str::contains("hunter2").not())
         .stderr(predicate::str::contains("nv never stores secrets"));
+}
+
+// ----- answers name the weekday; results show the start of the body -----
+
+#[test]
+fn answers_show_planned_and_expiry_dates_with_weekday() {
+    let nv_home = TempDir::new().unwrap();
+
+    nv(&nv_home)
+        .args(["add", "--title", "Send retry numbers", "--area", "work"])
+        .args(["--type", "commitment", "--planned", "2026-10-08"])
+        .write_stdin("I promised to send the retry numbers.")
+        .assert()
+        .success()
+        .stdout("Saved #1, planned Thu 2026-10-08\n");
+    nv(&nv_home)
+        .args(["add", "--title", "Vacation requests", "--area", "work"])
+        .args(["--expires-on", "2026-11-14"])
+        .write_stdin("Enter December vacation in Workday by 2026-11-14.")
+        .assert()
+        .success()
+        .stdout("Saved #2, expires Sat 2026-11-14\n");
+    nv(&nv_home)
+        .args(["note", "edit", "1", "--planned", "2026-10-12"])
+        .assert()
+        .success()
+        .stdout("Edited #1, planned Mon 2026-10-12\n");
+    nv(&nv_home)
+        .args(["note", "replace", "1", "--title", "Send both retry reports"])
+        .write_stdin("I promised to send both retry reports.")
+        .assert()
+        .success()
+        .stdout("Saved #3, replaces #1, planned Mon 2026-10-12\n");
+    nv(&nv_home)
+        .args(["note", "delete", "2"])
+        .assert()
+        .success()
+        .stdout("Deleted #2\n");
+}
+
+#[test]
+fn search_joins_the_wrapped_lines_of_the_first_paragraph() {
+    let nv_home = TempDir::new().unwrap();
+    nv(&nv_home)
+        .args(["add", "--title", "Review the PR", "--area", "work"])
+        .write_stdin(
+            "Anna promised to review the PR that\nraises the retry count.\n\nSecond paragraph.\n",
+        )
+        .assert()
+        .success();
+
+    nv(&nv_home)
+        .args(["search", "--area", "work"])
+        .assert()
+        .success()
+        .stdout(
+            "\
+#1  note · work · 2026-10-06 · active
+    Review the PR
+    Anna promised to review the PR that raises the retry count.
+",
+        );
 }

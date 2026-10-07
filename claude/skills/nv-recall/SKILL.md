@@ -57,13 +57,13 @@ All filters and the other read commands are in [cli-read.md](cli-read.md).
      Retry count for billing-api calls is 3.
 ```
 
-Each result has its ID, type, area, date and status, the title, the first line of the
-body, and the details.
+Each result has its ID, type, area, date and status, the title, the start of the body
+(up to 100 characters), and the details.
 
 - **nv ranks, it does not judge.** A text search returns the closest notes even when none
   answers the question. Read them. If nothing fits, say that nv has nothing on it; do not
   bend a near miss into an answer.
-- When the first line is not enough to answer, run `nv note show <id>` for the whole body.
+- When the start of the body is not enough to answer, run `nv note show <id>` for the whole body.
 - When two notes disagree, trust the newer one.
 - `outdated → #42` means the note was replaced: #42 says what is true now. Answer from #42.
 - A commitment shows `todo`, `done` or `dropped` in place of `active`.

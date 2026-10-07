@@ -36,6 +36,14 @@ impl Now {
 #[serde(try_from = "String", into = "String")]
 pub struct Date(NaiveDate);
 
+impl Date {
+    /// The date with its day of the week, like `Thu 2026-10-08`, so that a wrong date
+    /// is seen at once.
+    pub fn with_weekday(&self) -> String {
+        self.0.format("%a %Y-%m-%d").to_string()
+    }
+}
+
 impl std::str::FromStr for Date {
     type Err = anyhow::Error;
 
@@ -78,6 +86,7 @@ mod tests {
         assert_eq!(date.to_string(), "2026-10-08");
         assert_eq!(serde_json::to_string(&date).unwrap(), "\"2026-10-08\"");
         assert!(date < "2026-10-09".parse().unwrap());
+        assert_eq!(date.with_weekday(), "Thu 2026-10-08");
     }
 
     #[test]

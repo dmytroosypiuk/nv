@@ -16,14 +16,27 @@ pub fn json(out: &mut dyn Write, value: &impl Serialize) -> Result<()> {
     Ok(())
 }
 
-/// The answer to add, edit and delete: `Saved #42`, or the note as JSON.
+/// The answer to add, edit, replace and delete: `Saved #42`, or the note as JSON.
 pub fn change(out: &mut dyn Write, what_happened: &str, note: &Note, as_json: bool) -> Result<()> {
     if as_json {
         json(out, note)
     } else {
-        writeln!(out, "{what_happened} #{}", note.id)?;
+        writeln!(out, "{what_happened}")?;
         Ok(())
     }
+}
+
+/// `, planned Thu 2026-10-08, expires Sat 2026-11-14`: the dates of a saved note with
+/// their weekdays. Claude repeats them to the user, who sees a wrong day at once.
+pub fn dates(note: &Note) -> String {
+    let mut dates = String::new();
+    if let Some(planned_for) = note.planned_for {
+        dates.push_str(&format!(", planned {}", planned_for.with_weekday()));
+    }
+    if let Some(expires_on) = note.expires_on {
+        dates.push_str(&format!(", expires {}", expires_on.with_weekday()));
+    }
+    dates
 }
 
 /// A note plus the names the text output shows instead of IDs.
@@ -39,7 +52,7 @@ pub fn full_note(out: &mut dyn Write, shown: &ShownNote) -> Result<()> {
     Ok(())
 }
 
-/// The found notes, each with the first line of its body. `total` is how many notes a
+/// The found notes, each with the start of its body. `total` is how many notes a
 /// filter-only search found: when the limit cut the list, the last line says so.
 pub fn found_notes(out: &mut dyn Write, notes: &[ShownNote], total: Option<usize>) -> Result<()> {
     if notes.is_empty() {
@@ -211,8 +224,8 @@ pub fn embedded(out: &mut dyn Write, notes: usize) -> Result<()> {
 /// How much of the first body line a search result shows.
 const FIRST_LINE_LENGTH: usize = 100;
 
-/// Two to four lines: ID, type, area, date and status; the title; the first line of the
-/// body when `with_first_line`; then the details.
+/// Two to four lines: ID, type, area, date and status; the title; the start of the body
+/// when `with_first_line`; then the details.
 fn summary(shown: &ShownNote, with_first_line: bool) -> String {
     let note = &shown.note;
     let id = format!("#{}  ", note.id);
@@ -241,11 +254,21 @@ fn summary(shown: &ShownNote, with_first_line: bool) -> String {
     text
 }
 
-/// The first line of the body that is not empty, cut when it is long.
+/// The first paragraph of the body as one line, cut when it is long. Bodies are often
+/// wrapped, so one line of the body would stop in the middle of a sentence.
 fn first_line(body: &str) -> Option<String> {
-    let line = body.lines().map(str::trim).find(|line| !line.is_empty())?;
+    let paragraph: Vec<&str> = body
+        .lines()
+        .map(str::trim)
+        .skip_while(|line| line.is_empty())
+        .take_while(|line| !line.is_empty())
+        .collect();
+    let line = paragraph.join(" ");
+    if line.is_empty() {
+        return None;
+    }
     if line.chars().count() <= FIRST_LINE_LENGTH {
-        return Some(line.to_string());
+        return Some(line);
     }
     let cut: String = line.chars().take(FIRST_LINE_LENGTH).collect();
     Some(format!("{}…", cut.trim_end()))

@@ -246,6 +246,38 @@ fn skills_tell_the_rules_that_nv_cannot_check() {
     }
 }
 
+/// A small model reads only `SKILL.md`, not the linked files: what a correct `nv add`
+/// needs must be there. Found in the hand test with Haiku (2026-10-07).
+#[test]
+fn capture_skill_md_alone_is_enough_for_a_correct_note() {
+    let capture = skill_md("nv-capture");
+
+    for word in [
+        "`decision`",
+        "`commitment`",
+        "`how-to`",
+        "`fact`",
+        "`idea`",
+        "`work`",
+        "`learning`",
+        "`personal`",
+        "--expires-on",
+        "--source-kind",
+        "--owner",
+        "--planned",
+    ] {
+        assert!(capture.contains(word), "SKILL.md does not explain {word}");
+    }
+    let lower = capture.to_lowercase();
+    for rule in [
+        "write only what the user said",
+        "never copy facts from an example",
+        "copy the weekday from the answer of nv",
+    ] {
+        assert!(lower.contains(rule), "SKILL.md does not say: {rule}");
+    }
+}
+
 #[test]
 fn capture_carries_the_temporary_company_data_rule() {
     let capture = skill_md("nv-capture");
