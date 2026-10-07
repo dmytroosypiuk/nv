@@ -215,6 +215,7 @@ fn show_json_has_all_fields() {
             "source": {"kind": "meeting", "ref": "Sprint planning"},
             "repos": ["billing-api"],
             "tickets": ["PAY-1234"],
+            "expires_on": null,
             "created_at": MONDAY,
             "updated_at": MONDAY,
         })
@@ -447,4 +448,130 @@ fn unknown_nv_actor_is_an_error() {
         .assert()
         .code(1)
         .stderr("nv: unknown actor 'robot': use claude, user\n");
+}
+
+#[test]
+fn search_without_model_warns_and_uses_keywords() {
+    let nv_home = TempDir::new().unwrap();
+    add_retry_note(&nv_home);
+    let model_folder = nv_home.path().join("models").join("bge-small-en-v1.5");
+
+    nv(&nv_home)
+        .args(["search", "retries"])
+        .assert()
+        .success()
+        .stdout(predicate::str::starts_with("#1  decision"))
+        .stderr(format!(
+            "nv: model not found in {}: keyword search only\n",
+            model_folder.display()
+        ));
+}
+
+#[test]
+fn filter_only_search_needs_no_model_and_prints_no_warning() {
+    let nv_home = TempDir::new().unwrap();
+    add_retry_note(&nv_home);
+    add_retry_note_again(&nv_home);
+
+    nv(&nv_home)
+        .args(["search", "--ticket", "PAY-1234"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::starts_with("#1  decision").and(predicate::str::contains("#2").not()),
+        )
+        .stderr("");
+
+    nv(&nv_home)
+        .args(["search", "--since", "2026-10-06", "--area", "work"])
+        .assert()
+        .success()
+        .stdout(predicate::str::starts_with("#2  note"))
+        .stderr("");
+}
+
+#[test]
+fn search_without_query_or_filter_is_a_usage_error() {
+    let nv_home = TempDir::new().unwrap();
+
+    nv(&nv_home).arg("search").assert().code(2);
+    nv(&nv_home).args(["search", "--all"]).assert().code(2);
+    nv(&nv_home)
+        .args(["search", "--since", "yesterday"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains(
+            "'yesterday' is not a date like 2026-10-08",
+        ));
+}
+
+#[test]
+fn expired_note_is_hidden_unless_all() {
+    let nv_home = TempDir::new().unwrap();
+    nv(&nv_home)
+        .env("NV_NOW", MONDAY)
+        .args(["add", "--title", "Anna is on vacation", "--area", "work"])
+        .args(["--type", "fact", "--expires-on", "2026-10-05"])
+        .write_stdin("Back on Tuesday.")
+        .assert()
+        .success();
+
+    // Still true on its last day.
+    nv(&nv_home)
+        .env("NV_NOW", MONDAY)
+        .args(["search", "--type", "fact"])
+        .assert()
+        .stdout(predicate::str::contains("expires: 2026-10-05"));
+    nv(&nv_home)
+        .args(["search", "--type", "fact"])
+        .assert()
+        .success()
+        .stdout("No notes found.\n");
+    nv(&nv_home)
+        .args(["search", "--type", "fact", "--all"])
+        .assert()
+        .stdout(predicate::str::starts_with("#1  fact"));
+    // Still shown by ID.
+    nv(&nv_home).args(["note", "show", "1"]).assert().success();
+}
+
+#[test]
+fn add_returns_at_once_when_model_is_missing() {
+    let nv_home = TempDir::new().unwrap();
+
+    add_retry_note(&nv_home);
+
+    nv(&nv_home)
+        .args(["model", "info"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("(missing)")
+                .and(predicate::str::contains("notes: 0 embedded, 1 pending")),
+        );
+}
+
+#[test]
+fn reindex_without_model_fails() {
+    let nv_home = TempDir::new().unwrap();
+
+    nv(&nv_home)
+        .args(["model", "reindex"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::starts_with("nv: model not found in "));
+}
+
+#[test]
+fn embed_pending_is_hidden_from_help() {
+    let nv_home = TempDir::new().unwrap();
+
+    nv(&nv_home)
+        .args(["model", "--help"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("reindex")
+                .and(predicate::str::contains("embed-pending").not()),
+        );
 }

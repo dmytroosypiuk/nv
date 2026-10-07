@@ -71,6 +71,20 @@ The spike confirmed the model and fixed how nv runs, stores and ranks (2026-10-0
 - **Change log:** `add` is logged too (no previous state). Delete removes the row; the whole note, with repos and tickets, stays in `before_json`.
 - **Commitment status starts as `todo`** as soon as a note has type `commitment`, also when an edit changes the type.
 
+**Decided while building embeddings and hybrid search (step 3)**
+
+- **Model missing:** `nv search` still works with keywords only, prints one warning line on stderr and exits 0. `nv model reindex` fails without the model.
+- **Embedded text** is `"{title}\n{body}"`; `text_hash` is its SHA-256. Vectors are stored as 384 little-endian `f32` (1536 bytes).
+- **Candidates first:** filters and the expiry rule choose which notes the rankers may see, so a filter can never empty the top N. Each ranker gives its top 50 to RRF. "Active above outdated" is applied after fusion.
+- **Expiry:** a note is expired when today is after its `expires_on`; it is still true on that day. `nv note show <id>` shows it anyway.
+- **Filter-only search** lists newest first, active above outdated, and never loads the model. A search needs a query or at least one filter.
+- **With the model, a text search always returns up to `--limit` notes**: the vector ranker has no cut-off. Claude judges whether they answer the question.
+- **One background embedder at a time:** `nv model embed-pending` holds a lock on `<NV_HOME>/embed.lock` and runs until nothing is pending; a second one exits at once. Without this, 25 quick `nv add` calls loaded the model 25 times. It is started after `add` and `edit`, only when the model is installed.
+- **`nv model info`** shows model, dimensions, folder (found or missing) and how many notes are embedded and pending, without loading the model.
+- **No `active_model` in `meta` yet:** there is one model, a constant in the code. `embeddings.model` keeps vectors of different models apart for a later switch.
+- **Model test:** the pinned cosine (0.9094 for two fixed texts) fails with mean pooling (0.9016). The pinned ranking on the spike notes does not notice wrong pooling, so both tests are needed.
+- **Not built yet:** the `--person` filter comes with people; `--planned` works, but a planned date can only be set once commitments are built.
+
 **Build**
 
 - **Pin exact versions** in `Cargo.lock`: `ort` is still a release candidate.
@@ -313,9 +327,9 @@ nv people merge <id> <id>          # by ID: names are not unique
 nv history                         # change log
 nv history undo [<change-id>]
 
-nv model reindex
-nv model info
-nv model embed-pending             # hidden; started by nv add
+nv model reindex                   # embed every note again
+nv model info                      # model, folder, embedded and pending counts
+nv model embed-pending             # hidden; started by nv add and nv note edit
 
 # shortcuts
 nv add    = nv note add
@@ -444,7 +458,7 @@ Design and the embedding spike are done; next is the CLI, then the Claude Code s
 - [x] CLI commands: names, input, output, search filters (session 2)
 - [x] Note template: required and optional fields, writing rules (session 2)
 - [x] Spike: bge-small-en-v1.5 in Rust with fastembed-rs, offline, on 25 real notes (`spikes/embedding/REPORT.md`)
-- [ ] Build the CLI
+- [ ] Build the CLI (done: skeleton and schema, notes and change log, embeddings and hybrid search; next: commitments, people, links and history)
 - [ ] Write the Claude Code skill: when to save, when to search, saving rules, template
 - [ ] Check company rules for using Claude Code with project data
 

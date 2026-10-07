@@ -16,8 +16,16 @@ pub trait Embedder {
 pub trait ModelLoader {
     /// Name of the model, known without loading it.
     fn model(&self) -> &str;
+    fn dims(&self) -> usize;
+    /// True when the model files are there. Does not load them.
+    fn is_installed(&self) -> bool;
     /// The loaded embedder, or `None` when the model is not installed.
     fn load(&mut self) -> Result<Option<&mut dyn Embedder>>;
+
+    /// Like `load`, but gives `None` without loading when `skip` is true.
+    fn load_unless(&mut self, skip: bool) -> Result<Option<&mut dyn Embedder>> {
+        if skip { Ok(None) } else { self.load() }
+    }
 }
 
 #[cfg(test)]
@@ -89,6 +97,14 @@ pub mod fake {
     impl ModelLoader for FakeLoader {
         fn model(&self) -> &str {
             FAKE_MODEL
+        }
+
+        fn dims(&self) -> usize {
+            DIMS
+        }
+
+        fn is_installed(&self) -> bool {
+            !self.missing
         }
 
         fn load(&mut self) -> Result<Option<&mut dyn Embedder>> {

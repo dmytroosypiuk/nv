@@ -56,6 +56,33 @@ pub fn found_notes_json(out: &mut dyn Write, notes: &[Note]) -> Result<()> {
     json(out, &found)
 }
 
+#[derive(Debug, Serialize)]
+pub struct ModelInfo<'a> {
+    pub model: &'a str,
+    pub dims: usize,
+    pub folder: String,
+    pub installed: bool,
+    pub embedded: usize,
+    pub pending: usize,
+}
+
+pub fn model_info(out: &mut dyn Write, info: &ModelInfo<'_>) -> Result<()> {
+    let found = if info.installed { "found" } else { "missing" };
+    writeln!(out, "model: {} ({} dimensions)", info.model, info.dims)?;
+    writeln!(out, "folder: {} ({found})", info.folder)?;
+    writeln!(
+        out,
+        "notes: {} embedded, {} pending",
+        info.embedded, info.pending
+    )?;
+    Ok(())
+}
+
+pub fn embedded(out: &mut dyn Write, notes: usize) -> Result<()> {
+    writeln!(out, "Embedded {notes} notes")?;
+    Ok(())
+}
+
 /// Two or three lines: ID, type, area, date and status; the title; then the details.
 fn summary(note: &Note) -> String {
     let id = format!("#{}  ", note.id);
@@ -98,6 +125,9 @@ fn details(note: &Note) -> Vec<String> {
     }
     if let Some(source) = &note.source {
         details.push(format!("source: {}, {}", source.kind, source.reference));
+    }
+    if let Some(expires_on) = note.expires_on {
+        details.push(format!("expires: {expires_on}"));
     }
     details
 }

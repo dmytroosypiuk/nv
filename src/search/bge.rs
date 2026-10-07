@@ -75,16 +75,19 @@ impl BgeSmallLoader {
     pub fn model_dir(&self) -> &Path {
         &self.model_dir
     }
-
-    /// True when the model file is there. Does not load it.
-    pub fn is_installed(&self) -> bool {
-        self.model_dir.join("model.onnx").is_file()
-    }
 }
 
 impl ModelLoader for BgeSmallLoader {
     fn model(&self) -> &str {
         MODEL_NAME
+    }
+
+    fn dims(&self) -> usize {
+        DIMS
+    }
+
+    fn is_installed(&self) -> bool {
+        self.model_dir.join("model.onnx").is_file()
     }
 
     fn load(&mut self) -> Result<Option<&mut dyn Embedder>> {
@@ -187,7 +190,10 @@ mod tests {
 
         let mut rank_one = Vec::new();
         for query in &data.queries {
-            let query_vector = model.embed(&[query.query.clone()]).unwrap().remove(0);
+            let query_vector = model
+                .embed(std::slice::from_ref(&query.query))
+                .unwrap()
+                .remove(0);
             let best = note_vectors
                 .iter()
                 .zip(&data.notes)
