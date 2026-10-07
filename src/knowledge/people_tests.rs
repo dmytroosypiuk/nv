@@ -329,3 +329,234 @@ fn people_changes_are_in_the_change_log() {
     let before_edit: Person = serde_json::from_str(log[2].before_json.as_ref().unwrap()).unwrap();
     assert_eq!(before_edit, with_alias);
 }
+
+// ----- merge -----
+
+use crate::knowledge::note::{NoteDraft, NoteType};
+use crate::knowledge::store::NoteStore;
+use crate::test_support::work_note;
+
+const TUESDAY: &str = "2026-10-06T10:30:00+02:00";
+
+/// Saves a note about the given people; with `owner`, a commitment that person owns.
+fn note_about(conn: &Connection, title: &str, people: &[i64], owner: Option<i64>) -> i64 {
+    let mut fields = work_note(title, "Body.");
+    fields.people = people.to_vec();
+    if owner.is_some() {
+        fields.note_type = Some(NoteType::Commitment);
+        fields.owner = owner;
+    }
+    NoteStore::new(conn)
+        .add(&NoteDraft::new(fields).unwrap(), Actor::Claude, &at(MONDAY))
+        .unwrap()
+        .id
+}
+
+fn people_of(conn: &Connection, note_id: i64) -> Vec<i64> {
+    NoteStore::new(conn).get(note_id).unwrap().unwrap().people
+}
+
+fn owner_of(conn: &Connection, note_id: i64) -> Option<i64> {
+    NoteStore::new(conn).get(note_id).unwrap().unwrap().owner
+}
+
+fn last_merge(conn: &Connection, kept: i64) -> i64 {
+    change_log::changes_of_person(conn, kept)
+        .unwrap()
+        .into_iter()
+        .rfind(|change| change.action == Action::Merge)
+        .unwrap()
+        .id
+}
+
+#[test]
+fn merge_moves_aliases_and_notes_and_is_undoable() {
+    let conn = db::open_in_memory().unwrap();
+    let store = PeopleStore::new(&conn);
+    let nowak = add(&store, "Anna Nowak", Some("QA lead"), &["Anna"]);
+    let duplicate = add(&store, "Anna N.", None, &["Anna", "anna.nowak@contoso.com"]);
+    let hers = note_about(&conn, "Anna prefers async reviews", &[duplicate.id], None);
+    let untouched = note_about(&conn, "Anna owns the QA board", &[nowak.id], None);
+
+    let merged = store
+        .merge(nowak.id, duplicate.id, Actor::Claude, &at(TUESDAY))
+        .unwrap();
+
+    assert_eq!(
+        merged,
+        Person {
+            id: nowak.id,
+            name: "Anna Nowak".into(),
+            role: Some("QA lead".into()),
+            aliases: aliases(&["Anna", "Anna N.", "anna.nowak@contoso.com"]),
+        }
+    );
+    assert_eq!(store.get(nowak.id).unwrap(), Some(merged));
+    assert_eq!(store.get(duplicate.id).unwrap(), None);
+    assert_eq!(people_of(&conn, hers), [nowak.id]);
+    assert_eq!(people_of(&conn, untouched), [nowak.id]);
+
+    let (kept, returned) = store
+        .undo_merge(last_merge(&conn, nowak.id), Actor::User, &at(TUESDAY))
+        .unwrap();
+
+    assert_eq!(kept, nowak);
+    assert_eq!(returned, duplicate);
+    assert_eq!(store.get(nowak.id).unwrap(), Some(nowak.clone()));
+    assert_eq!(store.get(duplicate.id).unwrap(), Some(duplicate.clone()));
+    assert_eq!(people_of(&conn, hers), [duplicate.id]);
+    assert_eq!(people_of(&conn, untouched), [nowak.id]);
+}
+
+#[test]
+fn merge_moves_owned_commitments() {
+    let conn = db::open_in_memory().unwrap();
+    let store = PeopleStore::new(&conn);
+    let nowak = add(&store, "Anna Nowak", None, &[]);
+    let duplicate = add(&store, "Anna N.", None, &[]);
+    let owed = note_about(&conn, "Review the retry PR", &[], Some(duplicate.id));
+    let already_hers = note_about(&conn, "Send the test plan", &[], Some(nowak.id));
+
+    store
+        .merge(nowak.id, duplicate.id, Actor::Claude, &at(TUESDAY))
+        .unwrap();
+    assert_eq!(owner_of(&conn, owed), Some(nowak.id));
+
+    store
+        .undo_merge(last_merge(&conn, nowak.id), Actor::User, &at(TUESDAY))
+        .unwrap();
+    assert_eq!(owner_of(&conn, owed), Some(duplicate.id));
+    assert_eq!(owner_of(&conn, already_hers), Some(nowak.id));
+}
+
+#[test]
+fn merge_of_people_linked_to_the_same_note_keeps_one_link() {
+    let conn = db::open_in_memory().unwrap();
+    let store = PeopleStore::new(&conn);
+    let nowak = add(&store, "Anna Nowak", None, &[]);
+    let piotr = add(&store, "Piotr Zielinski", None, &[]);
+    let duplicate = add(&store, "Anna N.", None, &[]);
+    let shared = note_about(
+        &conn,
+        "Retry meeting",
+        &[duplicate.id, piotr.id, nowak.id],
+        None,
+    );
+
+    store
+        .merge(nowak.id, duplicate.id, Actor::Claude, &at(TUESDAY))
+        .unwrap();
+
+    let mut people = people_of(&conn, shared);
+    people.sort();
+    assert_eq!(people, [nowak.id, piotr.id]);
+
+    store
+        .undo_merge(last_merge(&conn, nowak.id), Actor::User, &at(TUESDAY))
+        .unwrap();
+    let mut people = people_of(&conn, shared);
+    people.sort();
+    assert_eq!(people, [nowak.id, piotr.id, duplicate.id]);
+}
+
+#[test]
+fn merge_keeps_role_of_kept_person_or_takes_the_other() {
+    let conn = db::open_in_memory().unwrap();
+    let store = PeopleStore::new(&conn);
+    let with_role = add(&store, "Anna Nowak", Some("QA lead"), &[]);
+    let other_role = add(&store, "Anna N.", Some("tester"), &[]);
+    let no_role = add(&store, "Piotr Zielinski", None, &[]);
+    let has_role = add(&store, "Piotr Z.", Some("DevOps"), &[]);
+
+    let anna = store
+        .merge(with_role.id, other_role.id, Actor::Claude, &at(TUESDAY))
+        .unwrap();
+    let piotr = store
+        .merge(no_role.id, has_role.id, Actor::Claude, &at(TUESDAY))
+        .unwrap();
+
+    assert_eq!(anna.role.as_deref(), Some("QA lead"));
+    assert_eq!(piotr.role.as_deref(), Some("DevOps"));
+}
+
+#[test]
+fn person_cannot_be_merged_into_itself() {
+    let conn = db::open_in_memory().unwrap();
+    let store = PeopleStore::new(&conn);
+    let anna = add(&store, "Anna Nowak", None, &[]);
+
+    let error = store
+        .merge(anna.id, anna.id, Actor::Claude, &at(TUESDAY))
+        .unwrap_err();
+
+    assert_eq!(person_error(error), PersonError::SamePerson);
+    assert_eq!(store.get(anna.id).unwrap(), Some(anna));
+}
+
+#[test]
+fn merge_with_unknown_person_fails_and_changes_nothing() {
+    let conn = db::open_in_memory().unwrap();
+    let store = PeopleStore::new(&conn);
+    let anna = add(&store, "Anna Nowak", None, &["Anna"]);
+
+    let error = store
+        .merge(anna.id, 99, Actor::Claude, &at(TUESDAY))
+        .unwrap_err();
+    assert_eq!(error.to_string(), "person #99 not found");
+    let error = store
+        .merge(99, anna.id, Actor::Claude, &at(TUESDAY))
+        .unwrap_err();
+    assert_eq!(error.to_string(), "person #99 not found");
+
+    assert_eq!(store.list().unwrap(), [anna.clone()]);
+    assert_eq!(
+        change_log::changes_of_person(&conn, anna.id).unwrap().len(),
+        1
+    );
+}
+
+#[test]
+fn id_of_a_merged_person_is_never_reused() {
+    let conn = db::open_in_memory().unwrap();
+    let store = PeopleStore::new(&conn);
+    let nowak = add(&store, "Anna Nowak", None, &[]);
+    let duplicate = add(&store, "Anna N.", None, &[]);
+    store
+        .merge(nowak.id, duplicate.id, Actor::Claude, &at(TUESDAY))
+        .unwrap();
+
+    let piotr = add(&store, "Piotr Zielinski", None, &[]);
+
+    assert_ne!(piotr.id, duplicate.id);
+}
+
+#[test]
+fn merge_can_be_undone_only_once_and_only_a_merge() {
+    let conn = db::open_in_memory().unwrap();
+    let store = PeopleStore::new(&conn);
+    let nowak = add(&store, "Anna Nowak", None, &[]);
+    let duplicate = add(&store, "Anna N.", None, &[]);
+    store
+        .merge(nowak.id, duplicate.id, Actor::Claude, &at(TUESDAY))
+        .unwrap();
+    let merge = last_merge(&conn, nowak.id);
+    let addition = change_log::changes_of_person(&conn, nowak.id).unwrap()[0].id;
+
+    store.undo_merge(merge, Actor::User, &at(TUESDAY)).unwrap();
+
+    let again = store
+        .undo_merge(merge, Actor::User, &at(TUESDAY))
+        .unwrap_err();
+    assert_eq!(again.to_string(), "person #2 already exists");
+    let not_a_merge = store
+        .undo_merge(addition, Actor::User, &at(TUESDAY))
+        .unwrap_err();
+    assert_eq!(
+        not_a_merge.to_string(),
+        format!("change #{addition} is not a merge")
+    );
+    assert!(store.undo_merge(404, Actor::User, &at(TUESDAY)).is_err());
+    // The undo itself is in the change log.
+    let log = change_log::changes_of_person(&conn, nowak.id).unwrap();
+    assert_eq!(log.last().unwrap().action, Action::Undo);
+}

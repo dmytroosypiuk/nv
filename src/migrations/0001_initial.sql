@@ -1,6 +1,6 @@
 -- Knowledge: every note, commitments included
 CREATE TABLE people (
-  id   INTEGER PRIMARY KEY,
+  id   INTEGER PRIMARY KEY AUTOINCREMENT,  -- an ID is never reused, so a merge can be undone
   name TEXT NOT NULL UNIQUE,
   role TEXT
 );

@@ -23,6 +23,7 @@ word_enum!(
         PersonEdit => "person-edit",
         Alias => "alias",
         Merge => "merge",
+        Undo => "undo",
     }
 );
 

@@ -1,7 +1,8 @@
 //! Saves and finds people. Every change goes to the change log.
 
-use anyhow::Result;
+use anyhow::{Context, Result, anyhow, bail};
 use rusqlite::{Connection, OptionalExtension, params};
+use serde::{Deserialize, Serialize};
 
 use super::change_log::{self, Action, Actor};
 use super::person::{Person, PersonError, is_full_alias, same_name, tidy};
@@ -16,6 +17,19 @@ pub fn person_name(conn: &Connection, person_id: i64) -> Result<Option<String>> 
             |row| row.get(0),
         )
         .optional()?)
+}
+
+/// What a merge changed, kept in the change log so that it can be undone.
+#[derive(Debug, Serialize, Deserialize)]
+struct MergeBefore {
+    kept: Person,
+    merged: Person,
+    /// Notes that were linked to the merged person only.
+    moved_note_ids: Vec<i64>,
+    /// Notes that were linked to both people.
+    shared_note_ids: Vec<i64>,
+    /// Commitments the merged person owned.
+    owned_note_ids: Vec<i64>,
 }
 
 pub struct PeopleStore<'c> {
@@ -141,6 +155,131 @@ impl<'c> PeopleStore<'c> {
         after.aliases.push(alias);
         self.save_change(&before, &after, Action::Alias, actor, now)?;
         Ok(after)
+    }
+
+    /// Makes one person out of two: notes, owned commitments and aliases of `other_id`
+    /// move to `keep_id`, the other main name becomes an alias, the other person is removed.
+    pub fn merge(&self, keep_id: i64, other_id: i64, actor: Actor, now: &Now) -> Result<Person> {
+        if keep_id == other_id {
+            return Err(PersonError::SamePerson.into());
+        }
+        let everyone = self.everyone()?;
+        let kept = existing(&everyone, keep_id)?;
+        let merged = existing(&everyone, other_id)?;
+
+        let mut after = kept.clone();
+        for name in std::iter::once(&merged.name).chain(&merged.aliases) {
+            if !has_name(&after, name) {
+                after.aliases.push(name.clone());
+            }
+        }
+        // The role of the kept person wins.
+        after.role = kept.role.clone().or_else(|| merged.role.clone());
+
+        let linked_to_kept = self.note_ids(
+            "SELECT note_id FROM note_people WHERE person_id = ?1",
+            keep_id,
+        )?;
+        let (shared_note_ids, moved_note_ids): (Vec<i64>, Vec<i64>) = self
+            .note_ids(
+                "SELECT note_id FROM note_people WHERE person_id = ?1",
+                other_id,
+            )?
+            .into_iter()
+            .partition(|note_id| linked_to_kept.contains(note_id));
+        let before = MergeBefore {
+            kept,
+            merged,
+            moved_note_ids,
+            shared_note_ids,
+            owned_note_ids: self
+                .note_ids("SELECT id FROM notes WHERE owner_person_id = ?1", other_id)?,
+        };
+
+        let tx = self.conn.unchecked_transaction()?;
+        // Notes linked to both people keep one link; the rest move.
+        for note_id in &before.shared_note_ids {
+            tx.execute(
+                "DELETE FROM note_people WHERE note_id = ?1 AND person_id = ?2",
+                params![note_id, other_id],
+            )?;
+        }
+        tx.execute(
+            "UPDATE note_people SET person_id = ?1 WHERE person_id = ?2",
+            params![keep_id, other_id],
+        )?;
+        tx.execute(
+            "UPDATE notes SET owner_person_id = ?1 WHERE owner_person_id = ?2",
+            params![keep_id, other_id],
+        )?;
+        tx.execute("DELETE FROM people WHERE id = ?1", [other_id])?;
+        save(&tx, &after)?;
+        let before_json = serde_json::to_string(&before)?;
+        change_log::record_for_person(&tx, now, actor, Action::Merge, keep_id, Some(before_json))?;
+        tx.commit()?;
+        Ok(after)
+    }
+
+    /// Takes a merge back: the removed person returns with their ID, aliases, notes and
+    /// commitments. Returns the two people as they are again.
+    pub fn undo_merge(&self, change_id: i64, actor: Actor, now: &Now) -> Result<(Person, Person)> {
+        let change = change_log::change(self.conn, change_id)?
+            .ok_or_else(|| anyhow!("change #{change_id} not found"))?;
+        let before: MergeBefore = match (change.action, &change.before_json) {
+            (Action::Merge, Some(json)) => serde_json::from_str(json)
+                .with_context(|| format!("change #{change_id} holds a merge nv cannot read"))?,
+            _ => bail!("change #{change_id} is not a merge"),
+        };
+        let MergeBefore {
+            kept,
+            merged,
+            moved_note_ids,
+            shared_note_ids,
+            owned_note_ids,
+        } = before;
+        let everyone = self.everyone()?;
+        existing(&everyone, kept.id)?;
+        if everyone.iter().any(|person| person.id == merged.id) {
+            bail!("person #{} already exists", merged.id);
+        }
+
+        let tx = self.conn.unchecked_transaction()?;
+        // The kept person first: it gives back the names the returning person needs.
+        save(&tx, &kept)?;
+        tx.execute(
+            "INSERT INTO people (id, name, role) VALUES (?1, ?2, ?3)",
+            params![merged.id, merged.name, merged.role],
+        )?;
+        save(&tx, &merged)?;
+        // Notes deleted since the merge are simply not there to update.
+        for note_id in moved_note_ids {
+            tx.execute(
+                "UPDATE note_people SET person_id = ?1 WHERE note_id = ?2 AND person_id = ?3",
+                params![merged.id, note_id, kept.id],
+            )?;
+        }
+        for note_id in shared_note_ids {
+            tx.execute(
+                "INSERT OR IGNORE INTO note_people (note_id, person_id)
+                 SELECT id, ?1 FROM notes WHERE id = ?2",
+                params![merged.id, note_id],
+            )?;
+        }
+        for note_id in owned_note_ids {
+            tx.execute(
+                "UPDATE notes SET owner_person_id = ?1 WHERE id = ?2 AND owner_person_id = ?3",
+                params![merged.id, note_id, kept.id],
+            )?;
+        }
+        change_log::record_for_person(&tx, now, actor, Action::Undo, kept.id, None)?;
+        tx.commit()?;
+        Ok((kept, merged))
+    }
+
+    fn note_ids(&self, sql: &str, person_id: i64) -> Result<Vec<i64>> {
+        let mut statement = self.conn.prepare(sql)?;
+        let ids = statement.query_map([person_id], |row| row.get(0))?;
+        Ok(ids.collect::<rusqlite::Result<_>>()?)
     }
 
     fn save_change(
