@@ -13,6 +13,8 @@ pub struct NoteFilter {
     pub note_type: Option<NoteType>,
     pub repo: Option<String>,
     pub ticket: Option<String>,
+    /// Notes linked to this person, and commitments the person owns.
+    pub person: Option<i64>,
     /// Notes created on or after this day.
     pub since: Option<Date>,
     /// Commitments planned for this day.
@@ -35,6 +37,7 @@ impl NoteFilter {
             || self.note_type.is_some()
             || self.repo.is_some()
             || self.ticket.is_some()
+            || self.person.is_some()
             || self.since.is_some()
             || self.planned.is_some()
     }
@@ -54,6 +57,8 @@ impl NoteFilter {
                AND (?5 IS NULL OR substr(created_at, 1, 10) >= ?5)
                AND (?6 IS NULL OR planned_for = ?6)
                AND (?7 OR expires_on IS NULL OR expires_on >= ?8)
+               AND (?9 IS NULL OR owner_person_id = ?9 OR EXISTS
+                     (SELECT 1 FROM note_people WHERE note_id = notes.id AND person_id = ?9))
              ORDER BY created_at DESC, id DESC",
         )?;
         let candidates = statement.query_map(
@@ -66,6 +71,7 @@ impl NoteFilter {
                 self.planned.map(|date| date.to_string()),
                 self.include_expired,
                 today.to_string(),
+                self.person,
             ],
             |row| {
                 Ok(Candidate {

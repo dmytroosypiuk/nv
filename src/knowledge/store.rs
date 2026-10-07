@@ -30,6 +30,7 @@ impl<'c> NoteStore<'c> {
             source: draft.source.clone(),
             repos: draft.repos.clone(),
             tickets: draft.tickets.clone(),
+            people: draft.people.clone(),
             expires_on: draft.expires_on,
             owner: draft.owner,
             planned_for: draft.planned_for,
@@ -37,7 +38,7 @@ impl<'c> NoteStore<'c> {
             created_at: now.timestamp(),
             updated_at: now.timestamp(),
         };
-        self.check_owner(&note)?;
+        self.check_people(&note)?;
         let tx = self.conn.unchecked_transaction()?;
         note.id = insert(&tx, &note, None)?;
         change_log::record(&tx, now, actor, Action::Add, note.id, None)?;
@@ -108,6 +109,13 @@ impl<'c> NoteStore<'c> {
                 "SELECT ticket_id FROM note_tickets WHERE note_id = ?1 ORDER BY rowid",
                 id,
             )?,
+            people: {
+                let mut statement = self.conn.prepare(
+                    "SELECT person_id FROM note_people WHERE note_id = ?1 ORDER BY rowid",
+                )?;
+                let people = statement.query_map([id], |row| row.get(0))?;
+                people.collect::<rusqlite::Result<_>>()?
+            },
             expires_on: row.expires_on.map(|date| date.parse()).transpose()?,
             owner: row.owner,
             planned_for: row.planned_for.map(|date| date.parse()).transpose()?,
@@ -136,7 +144,7 @@ impl<'c> NoteStore<'c> {
         let before = self.existing(id)?;
         let mut after = rule(&before)?;
         after.updated_at = now.timestamp();
-        self.check_owner(&after)?;
+        self.check_people(&after)?;
 
         let tx = self.conn.unchecked_transaction()?;
         tx.execute(
@@ -167,7 +175,8 @@ impl<'c> NoteStore<'c> {
         )?;
         tx.execute("DELETE FROM note_repos WHERE note_id = ?1", [id])?;
         tx.execute("DELETE FROM note_tickets WHERE note_id = ?1", [id])?;
-        insert_repos_and_tickets(&tx, &after)?;
+        tx.execute("DELETE FROM note_people WHERE note_id = ?1", [id])?;
+        insert_repos_tickets_and_people(&tx, &after)?;
         change_log::record(&tx, now, actor, action, id, Some(&before))?;
         tx.commit()?;
         Ok(after)
@@ -205,14 +214,14 @@ impl<'c> NoteStore<'c> {
         self.get(id)?.ok_or_else(|| anyhow!("note #{id} not found"))
     }
 
-    /// The owner of a commitment must be a known person.
-    fn check_owner(&self, note: &Note) -> Result<()> {
-        match note.owner {
-            Some(owner) if person_name(self.conn, owner)?.is_none() => {
-                bail!("person #{owner} not found")
+    /// The owner of a commitment and the people of a note must be known people.
+    fn check_people(&self, note: &Note) -> Result<()> {
+        for &person in note.owner.iter().chain(&note.people) {
+            if person_name(self.conn, person)?.is_none() {
+                bail!("person #{person} not found");
             }
-            _ => Ok(()),
         }
+        Ok(())
     }
 
     fn words(&self, sql: &str, note_id: i64) -> Result<Vec<String>> {
@@ -251,11 +260,11 @@ fn insert(conn: &Connection, note: &Note, id: Option<i64>) -> Result<i64> {
         },
     )?;
     let id = conn.last_insert_rowid();
-    insert_repos_and_tickets(conn, &Note { id, ..note.clone() })?;
+    insert_repos_tickets_and_people(conn, &Note { id, ..note.clone() })?;
     Ok(id)
 }
 
-fn insert_repos_and_tickets(conn: &Connection, note: &Note) -> Result<()> {
+fn insert_repos_tickets_and_people(conn: &Connection, note: &Note) -> Result<()> {
     for repo in &note.repos {
         conn.execute(
             "INSERT INTO note_repos (note_id, repo) VALUES (?1, ?2)",
@@ -266,6 +275,12 @@ fn insert_repos_and_tickets(conn: &Connection, note: &Note) -> Result<()> {
         conn.execute(
             "INSERT INTO note_tickets (note_id, ticket_id) VALUES (?1, ?2)",
             rusqlite::params![note.id, ticket],
+        )?;
+    }
+    for person in &note.people {
+        conn.execute(
+            "INSERT INTO note_people (note_id, person_id) VALUES (?1, ?2)",
+            rusqlite::params![note.id, person],
         )?;
     }
     Ok(())

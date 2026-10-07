@@ -84,6 +84,7 @@ mod tests {
             source: None,
             repos: vec![],
             tickets: vec![],
+            people: vec![],
             expires_on: None,
             owner: None,
             planned_for: Some(date("2026-10-07")),

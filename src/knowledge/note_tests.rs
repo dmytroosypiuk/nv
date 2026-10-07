@@ -9,6 +9,7 @@ fn fields(title: &str, body: &str) -> NoteFields {
         project: None,
         repos: vec![],
         tickets: vec![],
+        people: vec![],
         source: None,
         expires_on: None,
         owner: None,
@@ -29,6 +30,7 @@ fn note() -> Note {
         source: None,
         repos: vec!["billing-api".into()],
         tickets: vec![],
+        people: vec![],
         expires_on: None,
         owner: None,
         planned_for: None,
@@ -370,4 +372,18 @@ fn edit_can_change_the_owner_of_a_commitment() {
 
     assert_eq!(edited.owner, Some(9));
     assert_eq!(edited.planned_for, Some("2026-10-08".parse().unwrap()));
+}
+
+#[test]
+fn duplicate_people_on_a_note_are_kept_once() {
+    let mut fields = fields("title", "body");
+    fields.people = vec![7, 9, 7];
+
+    assert_eq!(NoteDraft::new(fields).unwrap().people, [7, 9]);
+
+    let changes = NoteChanges {
+        people: Some(vec![9, 9]),
+        ..NoteChanges::default()
+    };
+    assert_eq!(note().edited(&changes).unwrap().people, [9]);
 }

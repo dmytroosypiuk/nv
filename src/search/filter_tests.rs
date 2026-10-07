@@ -206,3 +206,36 @@ fn candidate_knows_if_the_note_is_outdated() {
         }]
     );
 }
+
+#[test]
+fn person_filter_finds_linked_notes_and_owned_commitments() {
+    let conn = db::open_in_memory().unwrap();
+    conn.execute_batch(
+        "INSERT INTO people (id, name) VALUES (7, 'Anna Nowak'), (9, 'Piotr Zielinski');",
+    )
+    .unwrap();
+    let mut about_anna = work_note("Anna prefers async reviews", "No calls before 10.");
+    about_anna.people = vec![7, 9];
+    let about_anna = add_at(&conn, about_anna, MONDAY);
+    let mut owed_by_anna = work_note("Review the retry PR", "Promised on the daily.");
+    owed_by_anna.note_type = Some(NoteType::Commitment);
+    owed_by_anna.owner = Some(7);
+    let owed_by_anna = add_at(&conn, owed_by_anna, TUESDAY);
+    let mut about_piotr = work_note("Piotr owns the gateway", "Ask him first.");
+    about_piotr.people = vec![9];
+    let about_piotr = add_at(&conn, about_piotr, WEDNESDAY);
+    add_note(&conn, "Retry 5 times", "For billing.");
+
+    let anna = NoteFilter {
+        person: Some(7),
+        ..NoteFilter::default()
+    };
+    let piotr = NoteFilter {
+        person: Some(9),
+        ..NoteFilter::default()
+    };
+
+    assert!(anna.narrows());
+    assert_eq!(ids(&conn, &anna, "2026-10-07"), [owed_by_anna, about_anna]);
+    assert_eq!(ids(&conn, &piotr, "2026-10-07"), [about_piotr, about_anna]);
+}

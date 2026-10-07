@@ -22,6 +22,7 @@ pub fn work_note(title: &str, body: &str) -> NoteFields {
         project: None,
         repos: vec![],
         tickets: vec![],
+        people: vec![],
         source: None,
         expires_on: None,
         owner: None,

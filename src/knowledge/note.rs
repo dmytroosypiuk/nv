@@ -146,6 +146,8 @@ pub struct NoteFields {
     pub project: Option<String>,
     pub repos: Vec<String>,
     pub tickets: Vec<String>,
+    /// IDs of the people who were involved.
+    pub people: Vec<i64>,
     pub source: Option<Source>,
     /// For time-limited facts: the last day the note is true.
     pub expires_on: Option<Date>,
@@ -183,6 +185,13 @@ impl NoteFields {
         }
         self.repos = without_blanks_and_duplicates(self.repos);
         self.tickets = without_blanks_and_duplicates(self.tickets);
+        let mut people = Vec::new();
+        for person in self.people {
+            if !people.contains(&person) {
+                people.push(person);
+            }
+        }
+        self.people = people;
 
         let source_reference = self.source.as_ref().map(|source| source.reference.as_str());
         let texts = [
@@ -244,6 +253,7 @@ pub struct NoteChanges {
     pub project: Option<String>,
     pub repos: Option<Vec<String>>,
     pub tickets: Option<Vec<String>>,
+    pub people: Option<Vec<i64>>,
     pub source: Option<Source>,
     pub expires_on: Option<Date>,
     pub owner: Option<i64>,
@@ -264,6 +274,9 @@ pub struct Note {
     pub source: Option<Source>,
     pub repos: Vec<String>,
     pub tickets: Vec<String>,
+    /// IDs of the people who were involved.
+    #[serde(default)]
+    pub people: Vec<i64>,
     #[serde(default)]
     pub expires_on: Option<Date>,
     /// Commitments only: the person who promised. `None` = me.
@@ -303,6 +316,7 @@ impl Note {
             project: changes.project.or_else(|| self.project.clone()),
             repos: changes.repos.unwrap_or_else(|| self.repos.clone()),
             tickets: changes.tickets.unwrap_or_else(|| self.tickets.clone()),
+            people: changes.people.unwrap_or_else(|| self.people.clone()),
             source: changes.source.or_else(|| self.source.clone()),
             expires_on: changes.expires_on.or(self.expires_on),
             owner: changes.owner.or(self.owner.filter(|_| stays_commitment)),
@@ -326,6 +340,7 @@ impl Note {
             source: fields.source,
             repos: fields.repos,
             tickets: fields.tickets,
+            people: fields.people,
             expires_on: fields.expires_on,
             owner: fields.owner,
             planned_for: fields.planned_for,

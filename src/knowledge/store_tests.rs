@@ -21,6 +21,7 @@ fn retry_fields() -> NoteFields {
         project: Some("Billing".into()),
         repos: vec!["billing-api".into(), "gateway".into()],
         tickets: vec!["PAY-1234".into()],
+        people: vec![],
         source: Some(Source {
             kind: SourceKind::Meeting,
             reference: "Sprint planning, 2026-10-05".into(),
@@ -59,6 +60,7 @@ fn added_note_can_be_read_back_with_repos_and_tickets() {
             source: fields.source,
             repos: fields.repos,
             tickets: fields.tickets,
+            people: vec![],
             expires_on: None,
             owner: None,
             planned_for: None,
@@ -450,4 +452,121 @@ fn refused_change_saves_nothing() {
             .to_string(),
         "note #99 not found"
     );
+}
+
+fn fields_with_people(people: &[i64]) -> NoteFields {
+    NoteFields {
+        people: people.to_vec(),
+        ..retry_fields()
+    }
+}
+
+#[test]
+fn note_people_are_saved_and_read_back() {
+    let conn = db::open_in_memory().unwrap();
+    let store = NoteStore::new(&conn);
+    add_person(&conn, 7, "Anna Nowak");
+    add_person(&conn, 9, "Piotr Zielinski");
+
+    let added = store
+        .add(
+            &NoteDraft::new(fields_with_people(&[9, 7])).unwrap(),
+            Actor::Claude,
+            &at(MONDAY),
+        )
+        .unwrap();
+
+    assert_eq!(added.people, [9, 7]);
+    assert_eq!(store.get(added.id).unwrap(), Some(added));
+}
+
+#[test]
+fn unknown_person_on_a_note_is_refused() {
+    let conn = db::open_in_memory().unwrap();
+    let store = NoteStore::new(&conn);
+    add_person(&conn, 7, "Anna Nowak");
+
+    let error = store
+        .add(
+            &NoteDraft::new(fields_with_people(&[7, 8])).unwrap(),
+            Actor::Claude,
+            &at(MONDAY),
+        )
+        .unwrap_err();
+
+    assert_eq!(error.to_string(), "person #8 not found");
+    assert_eq!(store.get(1).unwrap(), None);
+}
+
+#[test]
+fn edit_replaces_the_people_of_a_note() {
+    let conn = db::open_in_memory().unwrap();
+    let store = NoteStore::new(&conn);
+    add_person(&conn, 7, "Anna Nowak");
+    add_person(&conn, 9, "Piotr Zielinski");
+    let added = store
+        .add(
+            &NoteDraft::new(fields_with_people(&[7])).unwrap(),
+            Actor::Claude,
+            &at(MONDAY),
+        )
+        .unwrap();
+
+    let changes = NoteChanges {
+        people: Some(vec![9]),
+        ..NoteChanges::default()
+    };
+    let edited = store
+        .edit(added.id, &changes, Actor::User, &at(TUESDAY))
+        .unwrap();
+
+    assert_eq!(edited.people, [9]);
+    assert_eq!(store.get(added.id).unwrap().unwrap().people, [9]);
+    let unknown = NoteChanges {
+        people: Some(vec![8]),
+        ..NoteChanges::default()
+    };
+    assert!(
+        store
+            .edit(added.id, &unknown, Actor::User, &at(TUESDAY))
+            .is_err()
+    );
+    // An edit of another field keeps the people.
+    let title = NoteChanges {
+        title: Some("New title".into()),
+        ..NoteChanges::default()
+    };
+    assert_eq!(
+        store
+            .edit(added.id, &title, Actor::User, &at(TUESDAY))
+            .unwrap()
+            .people,
+        [9]
+    );
+}
+
+#[test]
+fn deleted_note_is_restored_with_its_people() {
+    let conn = db::open_in_memory().unwrap();
+    let store = NoteStore::new(&conn);
+    add_person(&conn, 7, "Anna Nowak");
+    let added = store
+        .add(
+            &NoteDraft::new(fields_with_people(&[7])).unwrap(),
+            Actor::Claude,
+            &at(MONDAY),
+        )
+        .unwrap();
+    store.delete(added.id, Actor::User, &at(TUESDAY)).unwrap();
+    let deletion = change_log::changes_of_note(&conn, added.id)
+        .unwrap()
+        .pop()
+        .unwrap();
+
+    let restored = store
+        .restore(deletion.id, Actor::User, &at(TUESDAY))
+        .unwrap();
+
+    assert_eq!(restored.people, [7]);
+    assert_eq!(store.get(added.id).unwrap(), Some(added));
 }

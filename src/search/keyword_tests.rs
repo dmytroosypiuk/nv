@@ -18,6 +18,7 @@ fn add(conn: &Connection, title: &str, body: &str) -> i64 {
         project: None,
         repos: vec![],
         tickets: vec![],
+        people: vec![],
         source: None,
         expires_on: None,
         owner: None,
