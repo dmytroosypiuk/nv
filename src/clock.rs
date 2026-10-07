@@ -1,7 +1,9 @@
 //! The current time, read once in `main` and passed down. Domain code never reads the clock.
 
 use anyhow::{Context, Result};
-use chrono::{DateTime, FixedOffset, Local, NaiveDate, SecondsFormat};
+use chrono::{
+    DateTime, Datelike, FixedOffset, Local, NaiveDate, SecondsFormat, TimeDelta, Weekday,
+};
 use serde::{Deserialize, Serialize};
 
 /// The moment a command runs, in the user's local time.
@@ -37,6 +39,26 @@ impl Now {
 pub struct Date(NaiveDate);
 
 impl Date {
+    /// The full name of the day of the week: `Thursday`.
+    pub fn weekday_name(&self) -> &'static str {
+        match self.0.weekday() {
+            Weekday::Mon => "Monday",
+            Weekday::Tue => "Tuesday",
+            Weekday::Wed => "Wednesday",
+            Weekday::Thu => "Thursday",
+            Weekday::Fri => "Friday",
+            Weekday::Sat => "Saturday",
+            Weekday::Sun => "Sunday",
+        }
+    }
+
+    /// The date `days` later, or earlier when negative; `None` at the end of the calendar.
+    pub fn plus_days(&self, days: i64) -> Option<Date> {
+        self.0
+            .checked_add_signed(TimeDelta::try_days(days)?)
+            .map(Self)
+    }
+
     /// The date with its day of the week, like `Thu 2026-10-08`, so that a wrong date
     /// is seen at once.
     pub fn with_weekday(&self) -> String {
@@ -87,6 +109,10 @@ mod tests {
         assert_eq!(serde_json::to_string(&date).unwrap(), "\"2026-10-08\"");
         assert!(date < "2026-10-09".parse().unwrap());
         assert_eq!(date.with_weekday(), "Thu 2026-10-08");
+        assert_eq!(date.weekday_name(), "Thursday");
+        assert_eq!(date.plus_days(7).unwrap().to_string(), "2026-10-15");
+        // 2026-09-30 is the Wednesday before.
+        assert_eq!(date.plus_days(-8).unwrap().weekday_name(), "Wednesday");
     }
 
     #[test]

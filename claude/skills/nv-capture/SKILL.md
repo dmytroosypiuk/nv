@@ -10,24 +10,21 @@ nv is the user's local notes store. You write the notes. What you do not save is
 
 ## Steps, every time
 
-1. **List the items.** Write one note for each item: each decision, each promise, each
-   fact. A promise by another person is its own commitment with `--owner`
-   ("Anna will review the PR by Friday"). Do not put it inside a different note.
+1. **List the items.** Write one note for each item: each decision, promise and fact.
+   A promise by another person is its own commitment with `--owner` ("Anna will review
+   the PR by Friday"), not a line inside another note.
 2. **Search first**: `nv search` on the same topic. If a note is already there, edit or
    replace it instead of making a duplicate.
 3. **Save right away.** Ask about missing facts, never about whether to save. If the note
-   needs a detail you do not have (which Anna, which date, which repo), ask that one
-   question; a note with a guess in it is worse. A promise with no clear day ("next
-   week"): save it without `--planned`, then ask for the day.
-4. **Confirm in one line**, with the weekday for any date: "Saved to nv: #42 Use
-   PostgreSQL 16 for reporting" or "Saved to nv: #43 Send retry numbers to Anna,
-   planned for Fri 2026-10-09". nv prints the weekday (`Saved #43, planned Fri
-   2026-10-09`). Copy the weekday from the answer of nv; do not calculate it. A weekday
-   the user did not say means a wrong date: correct the date in the body too (`--body`).
+   needs a detail you do not have (which Anna, which repo), ask that one question; a note
+   with a guess in it is worse. A promise with no clear day: see Commitments.
+4. **Confirm in one line**, with the weekday for any date: "Saved to nv: #43 Send retry
+   numbers to Anna, planned for Fri 2026-10-09". Copy the weekday from the answer of nv
+   (`Saved #43, planned Fri 2026-10-09`). A weekday the user did not say means a wrong
+   date: correct the date in the body too (`--body`).
 
-Save decisions, commitments, ideas, root causes, people's availability and roles, how-to
-knowledge, limits of tools. Do not save routine steps, what git or the repo docs already
-show, or personal things said in passing. The full table: [saving-rules.md](saving-rules.md).
+Save decisions, commitments, ideas, root causes, people's roles, how-tos, tool limits.
+Not routine steps, what git or the docs show, or personal remarks: [saving-rules.md](saving-rules.md).
 
 ## How to save
 
@@ -36,6 +33,7 @@ code, quotes and `$` arrive unchanged. Run nv commands as they are: no `cd`, no
 `2>/dev/null`.
 
 ```
+nv date
 nv search "database version reporting service"
 nv add --title "Use PostgreSQL 16 for the reporting service" --area work --type decision \
   --repo reporting --ticket REP-88 --person 7 \
@@ -54,49 +52,49 @@ EOF
   (true, no action; a root cause, a deadline, a person's role), `idea` (a maybe).
 - `--repo`, `--ticket`, `--project`, `--person <id>`: when the user named them.
 - `--source-kind` with `--source-ref`: where it came from. Kinds: `meeting`, `chat`,
-  `email`, `ticket`, `web`, `repo`, `doc`.
+  `email`, `ticket`, `web`, `repo`, `doc`. Do not invent a source: if the user did not
+  say where it came from, leave both out.
 - `--expires-on <date>`: for a fact with a deadline or an end, the last day it is true.
-- **Write only what the user said.** Do not add a number, a role, a repo or a cause that
-  the user did not give. The examples here show the form.
+- **Write only what the user said.** Add no number, role, repo or cause the user did not give.
   Never copy facts from an example.
 - **The body must make sense alone**, without this conversation, with the names, numbers,
   paths, versions and dates the user gave.
 - **Write in English**, also when the user speaks Ukrainian or Polish. The search model
   is English only.
-- **Turn relative dates into real dates.** "Tomorrow" and "Friday" become `2026-10-08`,
-  from today's date in your context, in the text and in every date flag. In the body,
-  write the date without the name of the weekday.
+- **Real dates only: look them up, never calculate.** Run `nv date`: it lists today and the
+  next 14 days with weekdays. "Tomorrow" and "Friday" become `2026-10-09` from that list,
+  in the text and in every date flag. nv refuses a weekday that does not match its date
+  ("Friday 2026-10-10"): fix the text and save again.
 - More examples of good notes are in [template.md](template.md).
 
 ## Secrets
 
-Never save passwords, tokens, API keys or private keys. nv refuses text that looks like
-one, but that check is a safety net for obvious forms only; leaving secrets out is your
-job. Save how to get access instead: "Staging database password: ask DevOps in
-#infra-help". When nv refuses, do not reword the secret; write the note without it.
+Never save passwords, tokens, API keys or private keys. nv refuses obvious forms, but that
+is a safety net only; leaving secrets out is your job. Save how to get access instead:
+"Staging database password: ask DevOps in #infra-help". If nv refuses, do not reword the
+secret: write the note without it.
 
 ## People
 
 People are addressed by ID: a name is not unique. Before `--person` or `--owner`, run
 `nv people search "anna"`. One match that fits: use that ID. Several, and the context
-does not decide: ask. No match: `nv people add "<name the user said>"`, with
-the name only.
+does not decide: ask. No match: `nv people add "<name the user said>"`, name only.
 
 ## Commitments
 
 A promise of action, by the user or to the user. This is what nv is most needed for.
-
 ```
 nv add --title "Send retry numbers to Anna" --area work --type commitment \
   --planned 2026-10-08 --person 7 <<'EOF'
 I promised Anna Nowak on the daily of 2026-10-07 to send last week's retry numbers.
 EOF
-nv commitment done 43
 ```
 
 `--owner <id>` when someone else promised; leave it out when the user did. `--planned`
 when a day is known. Finished: `nv commitment done`. Will not happen:
 `nv commitment drop`. Moved: `nv commitment postpone 43 2026-10-10`.
+**No clear day ("next week")? Never wait with the save.** Save it without `--planned`
+first, then ask for the day, then `nv note edit 43 --planned 2026-10-14`.
 
 ## Change a note: is the old version still true today?
 
@@ -108,7 +106,8 @@ when a day is known. Finished: `nv commitment done`. Will not happen:
   flags you give override the copied fields. The old note stays, marked outdated.
 - **It was never true**: `nv note delete 45`.
 - Two notes about the same thing, and neither replaces the other: `nv note link 42 51`.
-- A mistake of your own: `nv history undo` takes back the newest change.
+- A wrong date or a typo in your own note: `nv note edit`, not `replace`. A wrong change:
+  `nv history undo` takes back the newest change.
 
 Every command with its flags is in [cli-write.md](cli-write.md).
 

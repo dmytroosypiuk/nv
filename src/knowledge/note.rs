@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::secrets::{SecretKind, find_secret};
+use super::weekday_check::find_wrong_weekday;
 use crate::clock::Date;
 
 /// A rule of the Note aggregate that a change would break.
@@ -44,6 +45,16 @@ pub enum NoteError {
     LooksLikeSecret {
         field: &'static str,
         kind: SecretKind,
+    },
+    #[error(
+        "the {field} says \"{said}\", but {date} is a {actual}: check the date \
+         (`nv date` lists the next days)"
+    )]
+    WrongWeekday {
+        field: &'static str,
+        said: String,
+        date: String,
+        actual: &'static str,
     },
     #[error("unknown {what} '{value}': use {allowed}")]
     UnknownWord {
@@ -207,6 +218,16 @@ impl NoteFields {
         }
         self.people = people;
 
+        for (field, text) in [("title", &self.title), ("body", &self.body)] {
+            if let Some(wrong) = find_wrong_weekday(text) {
+                return Err(NoteError::WrongWeekday {
+                    field,
+                    said: wrong.said,
+                    date: wrong.date.to_string(),
+                    actual: wrong.actual,
+                });
+            }
+        }
         let source_reference = self.source.as_ref().map(|source| source.reference.as_str());
         let texts = [
             ("title", Some(self.title.as_str())),

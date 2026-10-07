@@ -7,3 +7,4 @@ pub mod people;
 pub mod person;
 pub mod secrets;
 pub mod store;
+pub mod weekday_check;

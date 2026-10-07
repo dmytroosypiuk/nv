@@ -6,6 +6,13 @@ or expiry date is in the answer with its weekday: `Saved #43, planned Thu 2026-1
 `Saved #44, expires Sat 2026-11-14`, `Postponed #43 to Mon 2026-10-12`. Check that
 weekday against what the user said.
 
+## Dates
+
+`nv date` lists today and the next 14 days with their weekdays: look a date up there.
+nv refuses a title or body where a weekday stands next to a date that is another day
+("Friday 2026-10-10" when it is a Saturday). The answer names the real day. Fix the text
+and run the command again.
+
 ## Add
 
 ```

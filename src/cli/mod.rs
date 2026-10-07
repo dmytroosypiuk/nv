@@ -46,6 +46,8 @@ enum Command {
     Add(AddArgs),
     /// Shortcut for `nv note search`
     Search(SearchArgs),
+    /// Today and the next days with their weekdays: look a date up, never calculate it
+    Date(DateArgs),
     /// Promises: done, drop, postpone and the today view
     #[command(subcommand)]
     Commitment(CommitmentCommand),
@@ -65,6 +67,15 @@ enum Command {
     /// The embedding model and its index
     #[command(subcommand)]
     Model(ModelCommand),
+}
+
+#[derive(Debug, Args)]
+struct DateArgs {
+    /// How many days after today to list
+    #[arg(long, default_value_t = 14, value_parser = clap::value_parser!(u16).range(..=366))]
+    days: u16,
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -520,6 +531,14 @@ pub fn run(cli: Cli, context: &mut Context<'_>, streams: Streams<'_>) -> Result<
                 output::found_notes_json(out, &found)
             } else {
                 output::found_notes(out, &found, outcome.total)
+            }
+        }
+        Command::Date(args) => {
+            let days = output::calendar(now.today(), args.days);
+            if args.json {
+                output::json(out, &days)
+            } else {
+                output::calendar_text(out, &days)
             }
         }
         Command::Today(args) | Command::Commitment(CommitmentCommand::Today(args)) => {

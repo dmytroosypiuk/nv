@@ -3,6 +3,22 @@
 Commands that only read. All of them take `--json` when you need the full fields; the
 compact text is enough for almost every answer.
 
+## Dates
+
+```
+nv date
+nv date --days 30
+```
+
+```
+Wed 2026-10-07  today
+Thu 2026-10-08  tomorrow
+Fri 2026-10-09
+```
+
+Today and the next 14 days (up to 366), one line each, with the weekday. Use it for every
+"tomorrow", "Friday" or "next week". It reads no notes and changes nothing.
+
 ## Search
 
 ```

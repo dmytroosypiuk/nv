@@ -154,6 +154,10 @@ A review of the first skill found that it would often not load for unprompted sa
 - **`nv-capture/SKILL.md` must be enough alone.** Haiku did not read the linked files: it tried `--type root-cause` and `--type deadline`, put an HR deadline in area `personal` without source or expiry, and copied "(was 3)" from the skill's example into a note. So the areas, the five types, source and expiry are listed in `SKILL.md` itself, with the rules "write only what the user said" and "never copy facts from an example", and the main example is about a different topic than the hand test. `tests/skill.rs` checks this.
 - **Second Haiku run (same day):** the types, area, expiry and weekdays were right. Still wrong: Anna's promise was written inside the decision note instead of its own commitment, with "Friday 2026-10-11" (a Sunday); the exam promise was dropped; Anna got the role "QA lead", copied from the example in the People section. So the first step of `nv-capture` is now "list the items, one note for each item, a promise by another person is its own commitment", a promise without a clear day must be asked about, the people example uses placeholders (`"<name the user said>"`), and the body carries dates without weekday names.
 - **Third Haiku run, one situation per message:** three separate notes for the first message, Anna's commitment with `--owner`, source and expiry on the HR fact, no password. Haiku chose 2026-10-10 for "Friday", nv answered `planned Sat 2026-10-10`, and Haiku corrected the date itself: the weekday in the answer works. Left over: the body still said "Friday 2026-10-10"; the exam promise was only asked about and never saved, because the user did not answer; Anna got an invented role again ("Reviewer"). So: a promise with no clear day is saved without `--planned` and then asked about; a corrected date is corrected in the body too; `SKILL.md` no longer shows `--role` (it stays in `cli-write.md`).
+- **First automated run (Haiku, 2026-10-07):** all four sessions that had "Friday" wrote 2026-10-10, a Saturday, and then dealt with nv's weekday answer in three different ways (replace, edit with the old body left behind, or only a question). So the two ideas that were first postponed are built:
+  - **`nv date [--days N] [--json]`** prints today and the next 14 days (up to 366), one line each with the weekday: `Wed 2026-10-07  today`, `Thu 2026-10-08  tomorrow`, `Fri 2026-10-09`. It reads no notes and writes no change log entry. The skills say: look the date up here, never calculate it.
+  - **Weekday check.** `nv add`, `nv note edit` and `nv note replace` refuse a title or body where a weekday stands next to a date that is another day: `Friday 2026-10-10`, `Fri, 2026-10-10`, `Friday (2026-10-10)`, `2026-10-10 (Friday)`. The answer names the real day: `the body says "Friday 2026-10-10", but 2026-10-10 is a Saturday: check the date (`nv date` lists the next days)`. Full names in any case; short forms only with a capital (`Fri`), so "we sat 2026-10-10" passes; a date that does not exist is left alone. Only English, only title and body. Nothing is saved when it refuses. An edit checks the whole note again, so a body that already has a wrong weekday must be fixed in the same edit (`--body`): this is wanted, it was the "date fixed, body left" case. Undo and restore do not check.
+  - **Skill text:** the Commitments section of `nv-capture` says "never wait with the save" (save without `--planned`, then ask, then `nv note edit --planned`); do not invent a source (leave `--source-kind` and `--source-ref` out when the user did not say where it came from); a wrong date or typo in your own note is fixed with `nv note edit`, not `replace`.
 - **The today hint** names the status: `nv search --type commitment --status todo`.
 - **A password told in a sentence is refused:** `password`, `passwd` or `pwd`, then `is`, then a value of 6 or more characters with a letter and a digit that is not a placeholder or a path. "The staging password is hunter2" is refused; "the password is stored in Vault" and "pwd is /home/anna2" pass. A password without a digit still passes: the check is a safety net, and the skill says so.
 
@@ -386,6 +390,8 @@ nv note delete <id>
 nv note link <id> <id>             # related
 nv note search "<query>" [filters]
 
+nv date [--days N] [--json]        # today and the next days with weekdays; default 14
+
 nv commitment today                # two lists, see below
 nv commitment done <id>            # "Done #12"
 nv commitment drop <id>            # "Dropped #12"
@@ -583,8 +589,6 @@ Design and the embedding spike are done; next is the CLI, then the Claude Code s
 
 **Later, not MVP**
 
-- Weekday check: `nv add` and `nv note edit` refuse a title or body where a weekday name stands next to a date that is a different day ("Friday 2026-10-11" → "2026-10-11 is a Sunday"). A safety net like the secret check. From the hand test on 2026-10-07: Haiku wrote that date in a body, where nv could not see it
-- Date helper: a command such as `nv date` that prints today and the next 14 days with their weekdays, so that Claude looks a date up instead of calculating it. The skill would say so. From the same hand test: small models get "Friday" wrong and the skills allow only `nv`, so they cannot run `date`
 - Notifications for planned commitments
 - Conflict check when saving a new note
 - Approval step before saving

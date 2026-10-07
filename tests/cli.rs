@@ -1933,3 +1933,118 @@ fn search_joins_the_wrapped_lines_of_the_first_paragraph() {
 ",
         );
 }
+
+// ----- nv date and the weekday check -----
+
+#[test]
+fn date_lists_today_and_the_next_14_days_with_weekdays() {
+    let nv_home = TempDir::new().unwrap();
+
+    nv(&nv_home).arg("date").assert().success().stdout(
+        "\
+Tue 2026-10-06  today
+Wed 2026-10-07  tomorrow
+Thu 2026-10-08
+Fri 2026-10-09
+Sat 2026-10-10
+Sun 2026-10-11
+Mon 2026-10-12
+Tue 2026-10-13
+Wed 2026-10-14
+Thu 2026-10-15
+Fri 2026-10-16
+Sat 2026-10-17
+Sun 2026-10-18
+Mon 2026-10-19
+Tue 2026-10-20
+",
+    );
+}
+
+#[test]
+fn date_days_sets_the_length_and_is_limited() {
+    let nv_home = TempDir::new().unwrap();
+
+    nv(&nv_home)
+        .args(["date", "--days", "1"])
+        .assert()
+        .success()
+        .stdout("Tue 2026-10-06  today\nWed 2026-10-07  tomorrow\n");
+    nv(&nv_home)
+        .args(["date", "--days", "0"])
+        .assert()
+        .success()
+        .stdout("Tue 2026-10-06  today\n");
+    nv(&nv_home)
+        .args(["date", "--days", "400"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("--days"));
+}
+
+#[test]
+fn date_json_has_date_weekday_and_label() {
+    let nv_home = TempDir::new().unwrap();
+
+    let days = stdout_json(nv(&nv_home).args(["date", "--days", "2", "--json"]));
+
+    assert_eq!(
+        days,
+        json!([
+            {"date": "2026-10-06", "weekday": "Tuesday", "label": "today"},
+            {"date": "2026-10-07", "weekday": "Wednesday", "label": "tomorrow"},
+            {"date": "2026-10-08", "weekday": "Thursday", "label": null},
+        ])
+    );
+}
+
+#[test]
+fn date_does_not_need_the_model_or_write_to_the_change_log() {
+    let nv_home = TempDir::new().unwrap();
+
+    nv(&nv_home).arg("date").assert().success();
+
+    nv(&nv_home)
+        .arg("history")
+        .assert()
+        .success()
+        .stdout("No changes yet.\n");
+}
+
+#[test]
+fn add_edit_and_replace_refuse_a_weekday_that_does_not_match_its_date() {
+    let nv_home = TempDir::new().unwrap();
+    let refusal = "nv: the body says \"Friday 2026-10-10\", but 2026-10-10 is a Saturday: \
+                   check the date (`nv date` lists the next days)\n";
+
+    nv(&nv_home)
+        .args(["add", "--title", "Review the PR", "--area", "work"])
+        .write_stdin("Anna reviews the PR by Friday 2026-10-10.")
+        .assert()
+        .code(1)
+        .stderr(refusal);
+    nv(&nv_home)
+        .arg("history")
+        .assert()
+        .stdout("No changes yet.\n");
+
+    add_plain_note(&nv_home, "Retry 3 times", MONDAY);
+    nv(&nv_home)
+        .args(["note", "edit", "1", "--body"])
+        .write_stdin("Reviewed by Friday 2026-10-10.")
+        .assert()
+        .code(1)
+        .stderr(refusal);
+    nv(&nv_home)
+        .args(["note", "replace", "1", "--title", "Retry 5 times"])
+        .write_stdin("Reviewed by Friday 2026-10-10.")
+        .assert()
+        .code(1)
+        .stderr(refusal);
+
+    nv(&nv_home)
+        .args(["add", "--title", "Review the PR", "--area", "work"])
+        .write_stdin("Anna reviews the PR by Friday 2026-10-09.")
+        .assert()
+        .success();
+}

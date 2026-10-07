@@ -67,6 +67,7 @@ const SKILLS: [(&str, &[&str]); 2] = [
     (
         "nv-recall",
         &[
+            "nv date",
             "nv search ",
             "nv note show ",
             "nv today",
@@ -78,6 +79,7 @@ const SKILLS: [(&str, &[&str]); 2] = [
     (
         "nv-capture",
         &[
+            "nv date",
             "nv search ",
             "nv add ",
             "nv note edit ",
@@ -229,7 +231,12 @@ fn skills_tell_the_rules_that_nv_cannot_check() {
             assert!(text.contains(rule), "{skill} does not mention: {rule}");
         }
     }
-    for rule in ["outdated →", "--limit 50", "nv ranks, it does not judge"] {
+    for rule in [
+        "outdated →",
+        "--limit 50",
+        "nv ranks, it does not judge",
+        "run `nv date`",
+    ] {
         assert!(recall.contains(rule), "nv-recall does not mention: {rule}");
     }
     for rule in [
@@ -277,6 +284,10 @@ fn capture_skill_md_alone_is_enough_for_a_correct_note() {
         "a promise by another person is its own commitment",
         "save it without `--planned`",
         "correct the date in the body too",
+        "run `nv date`",
+        "do not invent a source",
+        "not `replace`",
+        "never wait with the save",
     ] {
         assert!(lower.contains(rule), "SKILL.md does not say: {rule}");
     }

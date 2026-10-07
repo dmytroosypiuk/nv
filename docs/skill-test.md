@@ -132,3 +132,26 @@ Findings:
   `Skill(nv-recall)` to the allowed list is an open decision.
 - **A session started from inside Claude Code keeps no transcript** unless
   `CLAUDE_CODE_FORCE_SESSION_PERSISTENCE=1` is set.
+
+### First automated run (2026-10-07, Haiku 4.5, pty driver, `Skill(nv-*)` allowed)
+
+Seven fresh sessions, each with its own scratch store.
+
+| Case | Skill loaded | Notes saved | Went wrong |
+| --- | --- | --- | --- |
+| Four messages, run 1 | yes, on message 1 | none | Stopped at a prompt: Haiku ran `cd ~/.claude/skills/nv-capture && nv search …`, which asks to read that folder in default mode. The driver denies prompts. The skill says "no `cd`". |
+| Four messages, run 2 | yes, on message 1 | 6 (one outdated) | "Friday" written as 2026-10-10, found wrong by nv's `Sat`; corrected with `nv note replace`, not `edit`, so one extra outdated note. The exam promise was asked about and **not saved**. Invented source reference "code investigation, 2026-10-07". No `--repo` anywhere. Anna added without a role (the fix works). |
+| Passing remark, question 1 | yes, after it answered | 1 | Source "Team discussion" is a guess. |
+| Passing remark, question 2 | yes, after it answered | 1 | nothing |
+| Ukrainian | yes | 2, in English | "Friday" as 2026-10-10 again, fixed with `edit`, but the body still says "Friday 2026-10-10"; "from default to 5" is invented; `2>/dev/null` used; "Аня" became "Anya". |
+| Polish | yes | 2, in English | "Friday" as 2026-10-10; saw it was a Saturday but only **asked** the user, so the wrong date stays saved. |
+| (real store `~/.nv`) | | untouched | |
+
+- **Loading is not the problem:** the right skill loaded in 6 of 6 sessions that got past
+  start-up, also for a passing remark and in both languages. Haiku had names only.
+- **"Friday" is wrong every time:** 4 of 4 sessions wrote 2026-10-10. The weekday in nv's
+  answer caught it every time, but the fix differs (replace, edit, or only a question).
+  This is the strongest case for the `nv date` helper and the weekday check ("Later, not
+  MVP" in `docs/design.md`).
+- **Still not followed by Haiku:** save a promise without a date and then ask; no
+  invented source; correct a date in the body too; no `cd`, no `2>/dev/null`; `--repo`.

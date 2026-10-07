@@ -17,6 +17,7 @@ what was promised, what is planned or open.
 ## How to search
 
 ```
+nv date
 nv search "how many times do we retry billing calls"
 nv search "staging postgres access" --area work --limit 3
 nv search --ticket PAY-1234 --limit 50
@@ -31,8 +32,9 @@ nv today
   `--planned <date>`, not a text query. A ticket is `--ticket`, a project is `--project`,
   a person is `--person <id>`, open promises are `--type commitment --status todo`.
   A search with only filters is fine.
-- **Turn relative dates into real dates** before you call nv. "Tomorrow", "Friday" and
-  "last week" become `2026-10-08`, from today's date in your context. nv refuses words.
+- **Turn relative dates into real dates** before you call nv. Look them up, do not
+  calculate: run `nv date`. It lists today and the next 14 days with their weekdays.
+  "Tomorrow" and "Friday" become `2026-10-09` from that list. nv refuses words.
 - **On a search with only filters, pass `--limit 50`.** The default is 5. When there are
   more, the last line says `showing 5 of 7, use --limit`: run it again with a bigger limit
   before you answer "that is all".

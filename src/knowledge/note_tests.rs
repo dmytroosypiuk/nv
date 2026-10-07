@@ -716,3 +716,57 @@ fn replacement_does_not_copy_expiry() {
     assert_eq!(copied.expires_on, None);
     assert_eq!(given.expires_on, Some("2027-01-31".parse().unwrap()));
 }
+
+// ----- a weekday must match its date -----
+
+#[test]
+fn title_and_body_refuse_a_weekday_that_does_not_match_its_date() {
+    // 2026-10-10 is a Saturday.
+    let mut in_body = fields("Review the PR", "Anna reviews the PR by Friday 2026-10-10.");
+    let error = NoteDraft::new(in_body.clone()).unwrap_err();
+    assert_eq!(
+        error,
+        NoteError::WrongWeekday {
+            field: "body",
+            said: "Friday 2026-10-10".into(),
+            date: "2026-10-10".into(),
+            actual: "Saturday",
+        }
+    );
+    assert_eq!(
+        error.to_string(),
+        "the body says \"Friday 2026-10-10\", but 2026-10-10 is a Saturday: check the date \
+         (`nv date` lists the next days)"
+    );
+
+    in_body.title = "Review by Fri 2026-10-10".into();
+    in_body.body = "Anna reviews the PR.".into();
+    assert!(matches!(
+        NoteDraft::new(in_body).unwrap_err(),
+        NoteError::WrongWeekday { field: "title", .. }
+    ));
+    assert!(NoteDraft::new(fields("Review", "By Friday 2026-10-09.")).is_ok());
+}
+
+#[test]
+fn edit_refuses_a_wrong_weekday_in_the_body_that_stays_and_accepts_the_fix() {
+    let legacy = Note {
+        body: "Anna reviews the PR by Friday 2026-10-10.".into(),
+        ..commitment(CommitmentStatus::Todo)
+    };
+    let only_the_date = NoteChanges {
+        planned_for: Some("2026-10-09".parse().unwrap()),
+        ..NoteChanges::default()
+    };
+    let date_and_body = NoteChanges {
+        body: Some("Anna reviews the PR by Friday 2026-10-09.".into()),
+        ..only_the_date.clone()
+    };
+
+    assert!(matches!(
+        legacy.edited(&only_the_date).unwrap_err(),
+        NoteError::WrongWeekday { field: "body", .. }
+    ));
+    let fixed = legacy.edited(&date_and_body).unwrap();
+    assert_eq!(fixed.planned_for, Some("2026-10-09".parse().unwrap()));
+}

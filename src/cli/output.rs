@@ -5,6 +5,7 @@ use std::io::Write;
 use anyhow::Result;
 use serde::Serialize;
 
+use crate::clock::Date;
 use crate::commitments::today::TodayView;
 use crate::knowledge::history::HistoryEntry;
 use crate::knowledge::note::{Note, NoteStatus};
@@ -84,6 +85,41 @@ pub fn found_notes_json(out: &mut dyn Write, notes: &[ShownNote]) -> Result<()> 
         })
         .collect();
     json(out, &found)
+}
+
+/// One day of `nv date`.
+#[derive(Serialize)]
+pub struct CalendarDay {
+    date: String,
+    weekday: &'static str,
+    label: Option<&'static str>,
+}
+
+/// `today` and the `days` after it.
+pub fn calendar(today: Date, days: u16) -> Vec<CalendarDay> {
+    (0..=i64::from(days))
+        .map_while(|offset| Some((offset, today.plus_days(offset)?)))
+        .map(|(offset, date)| CalendarDay {
+            date: date.to_string(),
+            weekday: date.weekday_name(),
+            label: match offset {
+                0 => Some("today"),
+                1 => Some("tomorrow"),
+                _ => None,
+            },
+        })
+        .collect()
+}
+
+pub fn calendar_text(out: &mut dyn Write, days: &[CalendarDay]) -> Result<()> {
+    for day in days {
+        let weekday = day.weekday.get(..3).unwrap_or(day.weekday);
+        match day.label {
+            Some(label) => writeln!(out, "{weekday} {}  {label}", day.date)?,
+            None => writeln!(out, "{weekday} {}", day.date)?,
+        }
+    }
+    Ok(())
 }
 
 /// Two lists: what I planned for today (overdue included), and what others owe me.
