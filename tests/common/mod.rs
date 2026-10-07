@@ -10,7 +10,11 @@ use std::process::{Command, Output};
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 
-pub const ASSET: &str = "nv-0.1.0-x86_64-unknown-linux-gnu.tar.gz";
+pub const ASSET: &str = concat!(
+    "nv-",
+    env!("CARGO_PKG_VERSION"),
+    "-x86_64-unknown-linux-gnu.tar.gz"
+);
 pub const MODEL_ASSET: &str = "model-bge-small-en-v1.5.tar.gz";
 
 pub fn root() -> PathBuf {
@@ -115,7 +119,7 @@ impl World {
     }
 
     pub fn binary(&self) -> PathBuf {
-        self.path("home/bin/nv-0.1.0")
+        self.path(concat!("home/bin/nv-", env!("CARGO_PKG_VERSION")))
     }
 
     pub fn model(&self) -> PathBuf {

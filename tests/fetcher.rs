@@ -194,7 +194,11 @@ fn macos_apple_silicon_asks_for_its_own_asset() {
 
     assert_eq!(output.status.code(), Some(1));
     assert!(
-        text(&output.stderr).contains("nv-0.1.0-aarch64-apple-darwin.tar.gz"),
+        text(&output.stderr).contains(concat!(
+            "nv-",
+            env!("CARGO_PKG_VERSION"),
+            "-aarch64-apple-darwin.tar.gz"
+        )),
         "{}",
         text(&output.stderr)
     );

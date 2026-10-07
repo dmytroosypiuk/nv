@@ -110,7 +110,7 @@ fn dry_run_changes_nothing_and_names_every_step() {
     let said = String::from_utf8(output.stdout).unwrap();
     for step in [
         "cargo build --release",
-        "bin/nv-0.1.0",
+        concat!("bin/nv-", env!("CARGO_PKG_VERSION")),
         "link/nv",
         "old standalone skill, removed",
         "skills/nv-capture",
@@ -172,7 +172,10 @@ fn install_twice_removes_the_old_nv_block_once_and_keeps_one_of_each_permission(
         original
     );
     // The binary is where the plugin's launcher looks for it; `nv` in a terminal is a link.
-    let binary = target.dir.path().join("bin/nv-0.1.0");
+    let binary = target
+        .dir
+        .path()
+        .join(concat!("bin/nv-", env!("CARGO_PKG_VERSION")));
     assert!(binary.is_file());
     assert_eq!(
         fs::read_link(target.dir.path().join("link/nv")).unwrap(),
@@ -309,6 +312,9 @@ fn install_replaces_an_nv_that_an_earlier_install_left_in_the_link_folder() {
     );
     assert_eq!(
         fs::read_link(link.join("nv")).unwrap(),
-        target.dir.path().join("bin/nv-0.1.0")
+        target
+            .dir
+            .path()
+            .join(concat!("bin/nv-", env!("CARGO_PKG_VERSION")))
     );
 }
