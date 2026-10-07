@@ -108,6 +108,11 @@ cargo fmt && cargo clippy --all-targets -- -D warnings
 
 Test first, always: see `CLAUDE.md`.
 
+## License
+
+MIT, see [`LICENSE`](LICENSE). The embedding model (bge-small-en-v1.5, MIT) and ONNX Runtime
+(MIT) are the work of others: see [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+
 ## Before relying on it at work
 
 - Check that the plugin installs there: a work laptop may not allow a third-party

@@ -158,3 +158,13 @@ fn ci_checks_format_lints_and_tests_on_both_platforms() {
         assert!(ci.contains(needle), "ci.yml does not contain {needle}");
     }
 }
+
+#[test]
+fn the_release_files_carry_the_licence_notices() {
+    let release = file(".github/workflows/release.yml");
+
+    // The binary archive holds the licence and the notices next to `nv` (ONNX Runtime is
+    // inside the binary); the model archive holds the notice of the model.
+    assert!(release.contains("LICENSE THIRD_PARTY_NOTICES.md"));
+    assert!(release.contains("models/bge-small-en-v1.5/NOTICE"));
+}

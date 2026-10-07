@@ -58,7 +58,7 @@ fn plugin_manifest_has_the_fields_a_user_sees() {
     let plugin = json("plugin/.claude-plugin/plugin.json");
 
     assert_eq!(plugin["name"], "nv");
-    for field in ["description", "repository", "author"] {
+    for field in ["description", "repository", "author", "license"] {
         assert!(!plugin[field].is_null(), "plugin.json has no {field}");
     }
     assert_eq!(plugin["repository"], "https://github.com/dmytroosypiuk/nv");
@@ -95,5 +95,38 @@ fn claude_plugin_validate_passes_for_the_marketplace_and_the_plugin() {
 
         assert!(output.status.success(), "validate {path}:\n{said}");
         assert!(!said.contains("warning"), "validate {path} warns:\n{said}");
+    }
+}
+
+#[test]
+fn the_project_is_mit_licensed_and_says_so_everywhere() {
+    let license = fs::read_to_string(root().join("LICENSE")).unwrap();
+    let cargo = fs::read_to_string(root().join("Cargo.toml")).unwrap();
+    let readme = fs::read_to_string(root().join("README.md")).unwrap();
+
+    assert!(license.starts_with("MIT License"));
+    assert!(license.contains("Copyright (c) 2026 dmytroosypiuk"));
+    assert!(license.contains("Permission is hereby granted, free of charge"));
+    assert!(cargo.lines().any(|line| line == r#"license = "MIT""#));
+    assert_eq!(json("plugin/.claude-plugin/plugin.json")["license"], "MIT");
+    assert!(readme.contains("## License"));
+    assert!(readme.contains("THIRD_PARTY_NOTICES.md"));
+}
+
+#[test]
+fn third_party_notices_name_the_model_and_onnx_runtime() {
+    let notices = fs::read_to_string(root().join("THIRD_PARTY_NOTICES.md")).unwrap();
+
+    for needle in [
+        "bge-small-en-v1.5",
+        "BAAI",
+        "ONNX Runtime",
+        "MIT",
+        "Cargo.lock",
+    ] {
+        assert!(
+            notices.contains(needle),
+            "THIRD_PARTY_NOTICES.md does not mention {needle}"
+        );
     }
 }

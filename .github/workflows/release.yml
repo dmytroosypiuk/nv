@@ -83,7 +83,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir dist
-          tar -czf "dist/nv-${VERSION}-${{ matrix.target }}.tar.gz" -C target/${{ matrix.target }}/release nv
+          tar -czf "dist/nv-${VERSION}-${{ matrix.target }}.tar.gz" -C target/${{ matrix.target }}/release nv -C "$GITHUB_WORKSPACE" LICENSE THIRD_PARTY_NOTICES.md
       - uses: actions/upload-artifact@v4
         with:
           name: nv-${{ matrix.target }}
@@ -101,6 +101,7 @@ jobs:
       - name: Pack
         run: |
           mkdir dist
+          printf '%s\n' 'bge-small-en-v1.5 by BAAI, MIT License.' 'Source: https://huggingface.co/BAAI/bge-small-en-v1.5' 'Files are unchanged; SHA-256 sums: spikes/embedding/model.sha256 in https://github.com/dmytroosypiuk/nv' > models/bge-small-en-v1.5/NOTICE
           tar -czf dist/model-bge-small-en-v1.5.tar.gz -C models bge-small-en-v1.5
       - uses: actions/upload-artifact@v4
         with:
