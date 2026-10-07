@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::secrets::{SecretKind, find_secret};
+use crate::clock::Date;
 
 /// A rule of the Note aggregate that a change would break.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -142,6 +143,8 @@ pub struct NoteFields {
     pub repos: Vec<String>,
     pub tickets: Vec<String>,
     pub source: Option<Source>,
+    /// For time-limited facts: the last day the note is true.
+    pub expires_on: Option<Date>,
 }
 
 impl NoteFields {
@@ -224,6 +227,7 @@ pub struct NoteChanges {
     pub repos: Option<Vec<String>>,
     pub tickets: Option<Vec<String>>,
     pub source: Option<Source>,
+    pub expires_on: Option<Date>,
 }
 
 /// A saved note.
@@ -241,6 +245,8 @@ pub struct Note {
     pub source: Option<Source>,
     pub repos: Vec<String>,
     pub tickets: Vec<String>,
+    #[serde(default)]
+    pub expires_on: Option<Date>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -261,6 +267,7 @@ impl Note {
             repos: changes.repos.unwrap_or_else(|| self.repos.clone()),
             tickets: changes.tickets.unwrap_or_else(|| self.tickets.clone()),
             source: changes.source.or_else(|| self.source.clone()),
+            expires_on: changes.expires_on.or(self.expires_on),
         }
         .checked()?;
 
@@ -280,6 +287,7 @@ impl Note {
             source: fields.source,
             repos: fields.repos,
             tickets: fields.tickets,
+            expires_on: fields.expires_on,
             created_at: self.created_at.clone(),
             updated_at: self.updated_at.clone(),
         })

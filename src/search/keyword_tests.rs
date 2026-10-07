@@ -19,6 +19,7 @@ fn add(conn: &Connection, title: &str, body: &str) -> i64 {
         repos: vec![],
         tickets: vec![],
         source: None,
+        expires_on: None,
     })
     .unwrap();
     NoteStore::new(conn)

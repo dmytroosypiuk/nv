@@ -156,6 +156,7 @@ pub fn run(cli: Cli, context: &Context, stdin: &mut dyn Read, out: &mut dyn Writ
                 repos: args.repos,
                 tickets: args.tickets,
                 source: Source::from_parts(args.source_kind, args.source_ref)?,
+                expires_on: None,
             })?;
             let note = store.add(&draft, *actor, now)?;
             output::change(out, "Saved", &note, args.json)
@@ -180,6 +181,7 @@ pub fn run(cli: Cli, context: &Context, stdin: &mut dyn Read, out: &mut dyn Writ
                 repos: args.repos,
                 tickets: args.tickets,
                 source: Source::from_parts(args.source_kind, args.source_ref)?,
+                expires_on: None,
             };
             let note = store.edit(args.id, &changes, *actor, now)?;
             output::change(out, "Edited", &note, args.json)

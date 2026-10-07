@@ -25,6 +25,7 @@ fn retry_fields() -> NoteFields {
             kind: SourceKind::Meeting,
             reference: "Sprint planning, 2026-10-05".into(),
         }),
+        expires_on: None,
     }
 }
 
@@ -56,6 +57,7 @@ fn added_note_can_be_read_back_with_repos_and_tickets() {
             source: fields.source,
             repos: fields.repos,
             tickets: fields.tickets,
+            expires_on: None,
             created_at: MONDAY.into(),
             updated_at: MONDAY.into(),
         }
@@ -278,4 +280,28 @@ fn id_of_a_deleted_note_is_never_reused() {
         .unwrap();
 
     assert_ne!(second.id, first.id);
+}
+
+#[test]
+fn expires_on_is_saved_and_can_be_edited() {
+    let conn = db::open_in_memory().unwrap();
+    let store = NoteStore::new(&conn);
+    let mut fields = retry_fields();
+    fields.expires_on = Some("2026-10-12".parse().unwrap());
+
+    let added = store
+        .add(&NoteDraft::new(fields).unwrap(), Actor::Claude, &at(MONDAY))
+        .unwrap();
+    assert_eq!(added.expires_on, Some("2026-10-12".parse().unwrap()));
+    assert_eq!(store.get(added.id).unwrap(), Some(added.clone()));
+
+    let changes = NoteChanges {
+        expires_on: Some("2026-10-19".parse().unwrap()),
+        ..NoteChanges::default()
+    };
+    let edited = store
+        .edit(added.id, &changes, Actor::User, &at(TUESDAY))
+        .unwrap();
+    assert_eq!(edited.expires_on, Some("2026-10-19".parse().unwrap()));
+    assert_eq!(store.get(added.id).unwrap(), Some(edited));
 }

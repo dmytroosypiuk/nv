@@ -10,6 +10,7 @@ fn fields(title: &str, body: &str) -> NoteFields {
         repos: vec![],
         tickets: vec![],
         source: None,
+        expires_on: None,
     }
 }
 
@@ -26,6 +27,7 @@ fn note() -> Note {
         source: None,
         repos: vec!["billing-api".into()],
         tickets: vec![],
+        expires_on: None,
         created_at: "2026-10-06T09:00:00+02:00".into(),
         updated_at: "2026-10-06T09:00:00+02:00".into(),
     }

@@ -29,6 +29,7 @@ impl<'c> NoteStore<'c> {
             source: draft.source.clone(),
             repos: draft.repos.clone(),
             tickets: draft.tickets.clone(),
+            expires_on: draft.expires_on,
             created_at: now.timestamp(),
             updated_at: now.timestamp(),
         };
@@ -50,6 +51,7 @@ impl<'c> NoteStore<'c> {
             Option<String>,
             Option<String>,
             Option<String>,
+            Option<String>,
             String,
             String,
         );
@@ -57,7 +59,7 @@ impl<'c> NoteStore<'c> {
             .conn
             .query_row(
                 "SELECT title, body, area, type, project, status, commitment_status,
-                        source_kind, source_ref, created_at, updated_at
+                        source_kind, source_ref, expires_on, created_at, updated_at
                  FROM notes WHERE id = ?1",
                 [id],
                 |row| {
@@ -73,6 +75,7 @@ impl<'c> NoteStore<'c> {
                         row.get(8)?,
                         row.get(9)?,
                         row.get(10)?,
+                        row.get(11)?,
                     ))
                 },
             )
@@ -87,6 +90,7 @@ impl<'c> NoteStore<'c> {
             commitment_status,
             source_kind,
             source_ref,
+            expires_on,
             created_at,
             updated_at,
         )) = row
@@ -112,6 +116,7 @@ impl<'c> NoteStore<'c> {
                 "SELECT ticket_id FROM note_tickets WHERE note_id = ?1 ORDER BY rowid",
                 id,
             )?,
+            expires_on: expires_on.map(|date| date.parse()).transpose()?,
             created_at,
             updated_at,
         }))
@@ -125,7 +130,8 @@ impl<'c> NoteStore<'c> {
         let tx = self.conn.unchecked_transaction()?;
         tx.execute(
             "UPDATE notes SET title = ?2, body = ?3, area = ?4, type = ?5, project = ?6,
-                    commitment_status = ?7, source_kind = ?8, source_ref = ?9, updated_at = ?10
+                    commitment_status = ?7, source_kind = ?8, source_ref = ?9, updated_at = ?10,
+                    expires_on = ?11
              WHERE id = ?1",
             params![
                 id,
@@ -141,6 +147,7 @@ impl<'c> NoteStore<'c> {
                     .as_ref()
                     .map(|source| source.reference.as_str()),
                 after.updated_at,
+                after.expires_on.map(|date| date.to_string()),
             ],
         )?;
         tx.execute("DELETE FROM note_repos WHERE note_id = ?1", [id])?;
@@ -194,8 +201,8 @@ impl<'c> NoteStore<'c> {
 fn insert(conn: &Connection, note: &Note, id: Option<i64>) -> Result<i64> {
     conn.execute(
         "INSERT INTO notes (id, title, body, area, type, project, status, commitment_status,
-                            source_kind, source_ref, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                            source_kind, source_ref, created_at, updated_at, expires_on)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         params![
             id,
             note.title,
@@ -209,6 +216,7 @@ fn insert(conn: &Connection, note: &Note, id: Option<i64>) -> Result<i64> {
             note.source.as_ref().map(|source| source.reference.as_str()),
             note.created_at,
             note.updated_at,
+            note.expires_on.map(|date| date.to_string()),
         ],
     )?;
     let id = conn.last_insert_rowid();
