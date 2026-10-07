@@ -1,5 +1,7 @@
 //! Rules for commitment notes: status changes, postpone, today view.
 
+pub mod today;
+
 use thiserror::Error;
 
 use crate::clock::{Date, Now};
