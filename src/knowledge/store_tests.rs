@@ -99,7 +99,7 @@ fn add_writes_change_log_without_previous_state() {
     assert_eq!(changes.len(), 1);
     assert_eq!(changes[0].action, Action::Add);
     assert_eq!(changes[0].at, MONDAY);
-    assert_eq!(changes[0].before, None);
+    assert_eq!(changes[0].note_before().unwrap(), None);
 }
 
 #[test]
@@ -151,7 +151,7 @@ fn edit_writes_change_log_with_previous_state() {
     assert_eq!(log.len(), 2);
     assert_eq!(log[1].action, Action::Edit);
     assert_eq!(log[1].at, TUESDAY);
-    assert_eq!(log[1].before, Some(added));
+    assert_eq!(log[1].note_before().unwrap(), Some(added));
 }
 
 #[test]
@@ -212,7 +212,7 @@ fn delete_writes_change_log_and_can_be_restored() {
     let log = change_log::changes_of_note(&conn, added.id).unwrap();
     let deletion = log.last().unwrap();
     assert_eq!(deletion.action, Action::Delete);
-    assert_eq!(deletion.before, Some(added.clone()));
+    assert_eq!(deletion.note_before().unwrap(), Some(added.clone()));
 
     let restored = store
         .restore(deletion.id, Actor::User, &at(TUESDAY))
@@ -418,7 +418,7 @@ fn change_applies_the_rule_saves_and_logs_the_previous_state() {
     assert_eq!(log.len(), 2);
     assert_eq!(log[1].action, Action::Done);
     assert_eq!(log[1].actor, Actor::User);
-    assert_eq!(log[1].before, Some(added));
+    assert_eq!(log[1].note_before().unwrap(), Some(added));
 }
 
 #[test]

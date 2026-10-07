@@ -187,7 +187,7 @@ impl<'c> NoteStore<'c> {
     pub fn restore(&self, change_id: i64, actor: Actor, now: &Now) -> Result<Note> {
         let change = change_log::change(self.conn, change_id)?
             .ok_or_else(|| anyhow!("change #{change_id} not found"))?;
-        let note = match (change.action, change.before) {
+        let note = match (change.action, change.note_before()?) {
             (Action::Delete, Some(note)) => note,
             _ => bail!("change #{change_id} is not a deletion"),
         };

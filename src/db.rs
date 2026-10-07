@@ -14,6 +14,7 @@ pub const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const MIGRATIONS: &[&str] = &[
     include_str!("migrations/0001_initial.sql"),
     include_str!("migrations/0002_fts_triggers.sql"),
+    include_str!("migrations/0003_change_log_for_people.sql"),
 ];
 
 /// The schema version this binary knows.
@@ -59,11 +60,11 @@ fn prepare(mut conn: Connection) -> Result<Connection> {
     conn.busy_timeout(BUSY_TIMEOUT)?;
     conn.pragma_update_and_check(None, "journal_mode", "WAL", |_| Ok(()))?;
     conn.pragma_update(None, "foreign_keys", "ON")?;
-    migrate(&mut conn)?;
+    migrate(&mut conn, MIGRATIONS)?;
     Ok(conn)
 }
 
-fn migrate(conn: &mut Connection) -> Result<()> {
+fn migrate(conn: &mut Connection, migrations: &[&str]) -> Result<()> {
     conn.execute(
         "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
         [],
@@ -76,7 +77,7 @@ fn migrate(conn: &mut Connection) -> Result<()> {
             latest_schema_version()
         );
     }
-    for (index, migration) in MIGRATIONS.iter().enumerate() {
+    for (index, migration) in migrations.iter().enumerate() {
         let version = index as i64 + 1;
         if version <= current {
             continue;
@@ -273,5 +274,63 @@ mod tests {
             .unwrap();
 
         assert_eq!(found, 1);
+    }
+
+    #[test]
+    fn change_log_accepts_a_change_about_a_person() {
+        let conn = open_in_memory().unwrap();
+        let insert = "INSERT INTO change_log (at, actor, action, note_id, person_id)
+                      VALUES (?1, 'user', 'merge', ?2, ?3)";
+
+        assert!(conn.execute(insert, rusqlite::params![NOW, None::<i64>, 7]).is_ok());
+        assert!(conn.execute(insert, rusqlite::params![NOW, 1, None::<i64>]).is_ok());
+        // A change is always about something.
+        assert!(conn.execute(insert, rusqlite::params![NOW, None::<i64>, None::<i64>]).is_err());
+    }
+
+    #[test]
+    fn migration_0003_keeps_existing_change_log_rows() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        migrate(&mut conn, &MIGRATIONS[..2]).unwrap();
+        assert_eq!(schema_version(&conn).unwrap(), 2);
+        conn.execute(
+            "INSERT INTO change_log (id, at, actor, action, note_id, before_json)
+             VALUES (5, ?1, 'claude', 'edit', 42, '{\"id\":42}')",
+            [NOW],
+        )
+        .unwrap();
+
+        migrate(&mut conn, MIGRATIONS).unwrap();
+
+        assert_eq!(schema_version(&conn).unwrap(), latest_schema_version());
+        let row: (i64, String, String, String, i64, Option<i64>, String) = conn
+            .query_row(
+                "SELECT id, at, actor, action, note_id, person_id, before_json FROM change_log",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            row,
+            (
+                5,
+                NOW.to_string(),
+                "claude".to_string(),
+                "edit".to_string(),
+                42,
+                None,
+                "{\"id\":42}".to_string()
+            )
+        );
     }
 }
