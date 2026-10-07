@@ -282,10 +282,19 @@ mod tests {
         let insert = "INSERT INTO change_log (at, actor, action, note_id, person_id)
                       VALUES (?1, 'user', 'merge', ?2, ?3)";
 
-        assert!(conn.execute(insert, rusqlite::params![NOW, None::<i64>, 7]).is_ok());
-        assert!(conn.execute(insert, rusqlite::params![NOW, 1, None::<i64>]).is_ok());
+        assert!(
+            conn.execute(insert, rusqlite::params![NOW, None::<i64>, 7])
+                .is_ok()
+        );
+        assert!(
+            conn.execute(insert, rusqlite::params![NOW, 1, None::<i64>])
+                .is_ok()
+        );
         // A change is always about something.
-        assert!(conn.execute(insert, rusqlite::params![NOW, None::<i64>, None::<i64>]).is_err());
+        assert!(
+            conn.execute(insert, rusqlite::params![NOW, None::<i64>, None::<i64>])
+                .is_err()
+        );
     }
 
     #[test]
