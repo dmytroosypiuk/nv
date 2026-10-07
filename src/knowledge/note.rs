@@ -38,7 +38,7 @@ pub enum NoteError {
 macro_rules! word_enum {
     ($(#[$meta:meta])* $name:ident, $what:literal, { $($variant:ident => $word:literal),+ $(,)? }) => {
         $(#[$meta])*
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
         pub enum $name {
             $(#[serde(rename = $word)] $variant),+
         }
@@ -56,12 +56,12 @@ macro_rules! word_enum {
         }
 
         impl std::str::FromStr for $name {
-            type Err = NoteError;
+            type Err = $crate::knowledge::note::NoteError;
 
-            fn from_str(word: &str) -> Result<Self, NoteError> {
+            fn from_str(word: &str) -> Result<Self, Self::Err> {
                 match word {
                     $($word => Ok(Self::$variant),)+
-                    unknown => Err(NoteError::UnknownWord {
+                    unknown => Err(Self::Err::UnknownWord {
                         what: $what,
                         value: unknown.to_string(),
                         allowed: [$($word),+].join(", "),
@@ -71,6 +71,7 @@ macro_rules! word_enum {
         }
     };
 }
+pub(crate) use word_enum;
 
 word_enum!(
     /// What a note is about.

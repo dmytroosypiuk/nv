@@ -10,7 +10,7 @@ CREATE TABLE person_aliases (
   PRIMARY KEY (person_id, alias)      -- short aliases like 'Anna' may repeat
 );
 CREATE TABLE notes (
-  id          INTEGER PRIMARY KEY,
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,  -- an ID is never reused, so undo is safe
   title       TEXT NOT NULL,
   body        TEXT NOT NULL,
   area        TEXT NOT NULL CHECK (area IN ('work','learning','personal')),
@@ -65,7 +65,10 @@ CREATE TABLE embeddings (
   text_hash TEXT NOT NULL,            -- re-embed when the text changes
   PRIMARY KEY (note_id, model)
 );
-CREATE VIRTUAL TABLE notes_fts USING fts5(title, body, content='notes', content_rowid='id');
+-- porter: 'retries' finds 'retry'
+CREATE VIRTUAL TABLE notes_fts USING fts5(
+  title, body, content='notes', content_rowid='id', tokenize='porter unicode61'
+);
 
 -- Shared
 CREATE TABLE change_log (

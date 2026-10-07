@@ -11,7 +11,10 @@ use rusqlite::{Connection, OptionalExtension};
 pub const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Numbered migrations: the first entry brings the schema to version 1, and so on.
-const MIGRATIONS: &[&str] = &[include_str!("migrations/0001_initial.sql")];
+const MIGRATIONS: &[&str] = &[
+    include_str!("migrations/0001_initial.sql"),
+    include_str!("migrations/0002_fts_triggers.sql"),
+];
 
 /// The schema version this binary knows.
 pub fn latest_schema_version() -> i64 {
