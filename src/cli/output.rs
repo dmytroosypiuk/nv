@@ -6,6 +6,7 @@ use anyhow::Result;
 use serde::Serialize;
 
 use crate::commitments::today::TodayView;
+use crate::knowledge::history::HistoryEntry;
 use crate::knowledge::note::{Note, NoteStatus};
 use crate::knowledge::person::Person;
 
@@ -113,6 +114,39 @@ pub fn today(out: &mut dyn Write, view: &TodayView) -> Result<()> {
     Ok(())
 }
 
+/// The change log, newest first, one change per line.
+pub fn history(out: &mut dyn Write, entries: &[HistoryEntry]) -> Result<()> {
+    if entries.is_empty() {
+        writeln!(out, "No changes yet.")?;
+    }
+    let width = |text_of: &dyn Fn(&HistoryEntry) -> String| {
+        entries
+            .iter()
+            .map(|entry| text_of(entry).len())
+            .max()
+            .unwrap_or(0)
+    };
+    let id_width = width(&|entry| entry.id.to_string());
+    let actor_width = width(&|entry| entry.actor.to_string());
+    let action_width = width(&|entry| entry.action.to_string());
+    for entry in entries {
+        // "2026-10-07T09:12:00+02:00" is shown as "2026-10-07 09:12".
+        let at = entry.at.get(..16).unwrap_or(&entry.at).replace('T', " ");
+        let title = entry.title.as_deref().unwrap_or("");
+        let undone = if entry.undone { "  (undone)" } else { "" };
+        writeln!(
+            out,
+            "#{:<id_width$}  {at}  {:<actor_width$}  {:<action_width$}  {} #{}  {title}{undone}",
+            entry.id,
+            entry.actor.as_str(),
+            entry.action.as_str(),
+            entry.subject,
+            entry.subject_id,
+        )?;
+    }
+    Ok(())
+}
+
 /// Every person with role and all aliases, so Claude sees which Anna is which.
 pub fn people(out: &mut dyn Write, people: &[Person], as_json: bool) -> Result<()> {
     if as_json {
@@ -176,8 +210,12 @@ fn summary(shown: &ShownNote) -> String {
         .note_type
         .map_or("note", |note_type| note_type.as_str());
     let date = note.created_at.get(..10).unwrap_or(&note.created_at);
+    // An outdated note points to the newer note that says what is true now.
+    let newer = note
+        .replaced_by
+        .map_or(String::new(), |newer| format!(" → #{newer}"));
     let mut text = format!(
-        "{id}{note_type} · {} · {date} · {}\n{indent}{}\n",
+        "{id}{note_type} · {} · {date} · {}{newer}\n{indent}{}\n",
         note.area,
         status_word(note),
         note.title
@@ -224,5 +262,16 @@ fn details(shown: &ShownNote) -> Vec<String> {
     if let Some(expires_on) = note.expires_on {
         details.push(format!("expires: {expires_on}"));
     }
+    if !note.replaces.is_empty() {
+        details.push(format!("replaces: {}", note_ids(&note.replaces)));
+    }
+    if !note.related.is_empty() {
+        details.push(format!("related: {}", note_ids(&note.related)));
+    }
     details
+}
+
+fn note_ids(ids: &[i64]) -> String {
+    let ids: Vec<String> = ids.iter().map(|id| format!("#{id}")).collect();
+    ids.join(", ")
 }

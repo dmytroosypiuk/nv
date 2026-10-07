@@ -20,7 +20,7 @@ fn found(conn: &Connection, request: &SearchRequest<'_>, loader: &mut FakeLoader
 }
 
 fn mark_outdated(conn: &Connection, id: i64) {
-    // No command marks a note outdated before step 6.
+    // Only the status matters here; a real replace would add one more note.
     conn.execute("UPDATE notes SET status = 'outdated' WHERE id = ?1", [id])
         .unwrap();
 }
@@ -242,4 +242,33 @@ fn search_respects_limit() {
     assert_eq!(found(&conn, &request, &mut FakeLoader::default()).len(), 3);
     request.text = None;
     assert_eq!(found(&conn, &request, &mut FakeLoader::default()).len(), 3);
+}
+
+#[test]
+fn replaced_note_ranks_below_its_replacement() {
+    use crate::clock::Now;
+    use crate::knowledge::change_log::Actor;
+    use crate::knowledge::note::NoteDraft;
+    use crate::knowledge::store::NoteStore;
+
+    let conn = db::open_in_memory().unwrap();
+    let mut loader = FakeLoader::default();
+    // The old note matches the query better, word for word.
+    let old = add_note(
+        &conn,
+        "Retry count for billing calls",
+        "Retry billing calls 3 times.",
+    );
+    let new = NoteStore::new(&conn)
+        .replace(
+            old,
+            &NoteDraft::new(work_note("Retry count", "Now 5 times.")).unwrap(),
+            Actor::Claude,
+            &Now::parse(TUESDAY).unwrap(),
+        )
+        .unwrap();
+
+    let ids = found(&conn, &request(Some("retry billing calls")), &mut loader);
+
+    assert_eq!(ids, [new.id, old]);
 }

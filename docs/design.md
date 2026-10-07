@@ -110,6 +110,21 @@ The spike confirmed the model and fixed how nv runs, stores and ranks (2026-10-0
 - **No `nv people delete`:** a wrong duplicate is fixed with merge.
 - **Change log:** a change is about a note or about a person (`person_id`, migration 0003). People actions: `person-add`, `person-edit`, `alias`, `merge`, `undo`.
 
+**Decided while building links, replace, history and undo (step 6)**
+
+- **Replace:** `nv note replace <old-id>` takes the flags and stdin body of `nv add`. In one transaction the new note is saved, the old one becomes outdated and gets a `replaced_by` link. Answer: `Saved #43, replaces #17`.
+- **A note is replaced by exactly one note.** Replacing an outdated note is refused; replace the newer one.
+- **Outdated ⇔ has a `replaced_by` link**, checked in Rust before every save.
+- **A note that replaced another cannot be deleted**: the old note would stay outdated with nothing saying what is true now. Undo the replace, or replace the note again.
+- **Related links have no direction:** stored once, shown on both notes. Linking twice changes nothing. There is no unlink command; a wrong link is taken back with undo. A link is logged as a change of both notes.
+- **History:** `nv history [--note <id>] [--person <id>] [--limit N] [--json]`, newest first, default 20. A note or person that is gone still shows its last title or name.
+- **Undo:** `nv history undo [<change-id>]`; without an ID, the newest change that still stands. Answer: `Undone #31: replace of note #17`.
+- **Only the last change of a note or person can be undone.** Otherwise: "note #12 changed after change #28: undo change #35 first". Undo never throws away newer changes silently.
+- **What undo does:** `add` removes the note; `edit`, `done`, `drop`, `postpone`, `link` put the note back as it was; `delete` brings the note back with ID, repos, tickets, people and links; `replace` removes the new note and makes the old one active again (refused when the new note changed since); `person-add` removes a person no note uses; `person-edit` and `alias` put the person back; `merge` splits the two people again.
+- **An undo is not undone.** The undone change is marked (`undone_at`, migration 0004) and the undo is its own entry, which keeps the state it removed, so the log never loses anything.
+- **People that no longer exist** (merged away) are left out of a note that undo brings back, with a warning on stderr. A missing owner makes the undo fail instead.
+- **Undo starts the embedder** when note text changed or came back.
+
 **Build**
 
 - **Pin exact versions** in `Cargo.lock`: `ort` is still a release candidate.
@@ -334,9 +349,9 @@ Commands are Docker-style, object first then action, with three shortcuts for da
 nv note add                        # body from stdin
 nv note edit <id>
 nv note show <id>
-nv note replace <old-id>
+nv note replace <old-id>           # same flags as add; body from stdin
 nv note delete <id>
-nv note link <id> <id>
+nv note link <id> <id>             # related
 nv note search "<query>" [filters]
 
 nv commitment today                # two lists, see below
@@ -351,8 +366,8 @@ nv people search "<text>"
 nv people alias <id> "<alias>"
 nv people merge <keep-id> <other-id>   # by ID: names are not unique
 
-nv history                         # change log
-nv history undo [<change-id>]
+nv history [--note <id>] [--person <id>] [--limit N]   # change log, newest first
+nv history undo [<change-id>]      # without an ID: the newest change that still stands
 
 nv model reindex                   # embed every note again
 nv model info                      # model, folder, embedded and pending counts
@@ -401,8 +416,16 @@ Others owe you
 
 Nothing to show: `Nothing planned for today.`
 
+History:
+
+```
+#5  2026-10-07 09:00  claude  edit        note #2  Retry 5 times for billing-api  (undone)
+#4  2026-10-06 10:30  user    replace     note #1  Retry 3 times
+#2  2026-10-05 09:00  claude  person-add  person #1  Anna Nowak
+```
+
 - A note with no type shows `note`. A commitment shows `todo`, `done` or `dropped` in place of `active`.
-- The details line holds owner, planned date, project, repos, tickets, people, source and expiry date, only those that are set. A commitment of mine shows no owner.
+- The details line holds owner, planned date, project, repos, tickets, people, source, expiry date, `replaces: #17` and `related: #5, #9`, only those that are set. A commitment of mine shows no owner.
 - `nv note show` prints the same lines, then an empty line and the body.
 - `nv add` answers `Saved #42` (`Edited #42`, `Deleted #42`); with `--json`, the whole note.
 - No results: `No notes found.` Search `--json` is a list of notes, each with its `rank`.
@@ -485,10 +508,12 @@ CREATE TABLE change_log (
   id INTEGER PRIMARY KEY, at TEXT NOT NULL,   -- injected, no SQL default
   actor TEXT NOT NULL,            -- 'claude' or 'user'
   action TEXT NOT NULL,           -- 'add', 'edit', 'delete', 'restore', 'done', 'drop', 'postpone',
-                                  -- 'person-add', 'person-edit', 'alias', 'merge', 'undo'
+                                  -- 'replace', 'link', 'person-add', 'person-edit', 'alias',
+                                  -- 'merge', 'undo'
   note_id INTEGER, person_id INTEGER,   -- a change is about a note or about a person
   CHECK (note_id IS NOT NULL OR person_id IS NOT NULL),
-  before_json TEXT                -- old state, used by undo
+  before_json TEXT,               -- old state, used by undo
+  undone_at TEXT                  -- set when the change was undone; the line stays
 );
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);  -- schema version, active model
 ```
@@ -510,7 +535,7 @@ Design and the embedding spike are done; next is the CLI, then the Claude Code s
 - [x] CLI commands: names, input, output, search filters (session 2)
 - [x] Note template: required and optional fields, writing rules (session 2)
 - [x] Spike: bge-small-en-v1.5 in Rust with fastembed-rs, offline, on 25 real notes (`spikes/embedding/REPORT.md`)
-- [ ] Build the CLI (done: skeleton and schema, notes and change log, embeddings and hybrid search, commitments, people; next: links, replace and history)
+- [ ] Build the CLI (done: skeleton and schema, notes and change log, embeddings and hybrid search, commitments, people, links, replace, history and undo)
 - [ ] Write the Claude Code skill: when to save, when to search, saving rules, template
 - [ ] Check company rules for using Claude Code with project data
 

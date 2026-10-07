@@ -303,3 +303,49 @@ fn commitment_commands_do_not_start_background_embedding() {
     assert_eq!(nv.background.started, started);
     assert_eq!(nv.loader.loads, 0);
 }
+
+#[test]
+fn replace_and_undo_start_background_embedding() {
+    let mut nv = Nv::new();
+    nv.add("Retry 3 times", "For billing calls.", &[]);
+    assert_eq!(nv.background.started, 1);
+
+    let replaced = nv.run(
+        &[
+            "note",
+            "replace",
+            "1",
+            "--title",
+            "Retry 5 times",
+            "--area",
+            "work",
+        ],
+        "Now 5.",
+    );
+    assert_eq!(replaced.out, "Saved #2, replaces #1\n");
+    assert_eq!(nv.background.started, 2);
+
+    // Undoing the replace changes no text of a note that stays.
+    let undone = nv.run(&["history", "undo"], "");
+    assert_eq!(undone.out, "Undone #3: replace of note #1\n");
+    assert_eq!(nv.background.started, 2);
+
+    nv.run(&["note", "edit", "1", "--title", "Retry three times"], "");
+    assert_eq!(nv.background.started, 3);
+    // Undoing an edit of the title brings old text back: it must be embedded again.
+    nv.run(&["history", "undo"], "");
+    assert_eq!(nv.background.started, 4);
+}
+
+#[test]
+fn history_does_not_load_model() {
+    let mut nv = Nv::new();
+    nv.add("Retry 3 times", "For billing calls.", &[]);
+    nv.add("Retry budget", "At most 10%.", &[]);
+
+    nv.run(&["note", "link", "1", "2"], "");
+    nv.run(&["history"], "");
+    nv.run(&["history", "undo"], "");
+
+    assert_eq!(nv.loader.loads, 0);
+}

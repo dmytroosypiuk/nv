@@ -17,6 +17,7 @@ use crate::commitments::{mark_done, mark_dropped, postpone};
 use crate::config::NvHome;
 use crate::db;
 use crate::knowledge::change_log::{Action, Actor};
+use crate::knowledge::history::{HistoryFilter, history, undo};
 use crate::knowledge::note::{
     Area, Note, NoteChanges, NoteDraft, NoteFields, NoteType, Source, SourceKind,
 };
@@ -52,9 +53,38 @@ enum Command {
     /// People: main name, aliases, role. Always addressed by ID
     #[command(subcommand)]
     People(PeopleCommand),
+    /// The change log; `nv history undo` takes a change back
+    #[command(args_conflicts_with_subcommands = true)]
+    History {
+        #[command(subcommand)]
+        command: Option<HistoryCommand>,
+        #[command(flatten)]
+        args: HistoryArgs,
+    },
     /// The embedding model and its index
     #[command(subcommand)]
     Model(ModelCommand),
+}
+
+#[derive(Debug, Subcommand)]
+enum HistoryCommand {
+    /// Undo one change; without an ID, the newest one that still stands
+    Undo { change_id: Option<i64> },
+}
+
+#[derive(Debug, Args)]
+struct HistoryArgs {
+    /// Only changes of this note
+    #[arg(long)]
+    note: Option<i64>,
+    /// Only changes of this person
+    #[arg(long)]
+    person: Option<i64>,
+    /// How many changes to show at most
+    #[arg(long, default_value_t = 20)]
+    limit: usize,
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -136,6 +166,10 @@ enum NoteCommand {
     Show(ShowArgs),
     /// Change fields of a note that is still true
     Edit(EditArgs),
+    /// Save a newer note that says what is true now; the old one becomes outdated
+    Replace(ReplaceArgs),
+    /// Link two notes as related
+    Link { id: i64, other_id: i64 },
     /// Delete a note that was a mistake (kept in the change log)
     Delete(DeleteArgs),
     /// Find notes by meaning, keyword and filters
@@ -181,6 +215,14 @@ struct AddArgs {
     planned_for: Option<Date>,
     #[arg(long)]
     json: bool,
+}
+
+#[derive(Debug, Args)]
+struct ReplaceArgs {
+    /// The note that is no longer true
+    old_id: i64,
+    #[command(flatten)]
+    note: AddArgs,
 }
 
 #[derive(Debug, Args)]
@@ -298,23 +340,29 @@ pub fn run(cli: Cli, context: &mut Context<'_>, streams: Streams<'_>) -> Result<
 
     match cli.command {
         Command::Add(args) | Command::Note(NoteCommand::Add(args)) => {
-            let draft = NoteDraft::new(NoteFields {
-                title: args.title,
-                body: read_body(stdin)?,
-                area: args.area,
-                note_type: args.note_type,
-                project: args.project,
-                repos: args.repos,
-                tickets: args.tickets,
-                people: args.people,
-                source: Source::from_parts(args.source_kind, args.source_ref)?,
-                expires_on: args.expires_on,
-                owner: args.owner,
-                planned_for: args.planned_for,
-            })?;
-            let note = store.add(&draft, actor, &now)?;
+            let as_json = args.json;
+            let note = store.add(&draft(args, stdin)?, actor, &now)?;
             embed_in_background(context);
-            output::change(out, "Saved", &note, args.json)
+            output::change(out, "Saved", &note, as_json)
+        }
+        Command::Note(NoteCommand::Replace(args)) => {
+            let as_json = args.note.json;
+            let note = store.replace(args.old_id, &draft(args.note, stdin)?, actor, &now)?;
+            embed_in_background(context);
+            if as_json {
+                output::json(out, &note)
+            } else {
+                writeln!(out, "Saved #{}, replaces #{}", note.id, args.old_id)?;
+                Ok(())
+            }
+        }
+        Command::Note(NoteCommand::Link { id, other_id }) => {
+            if store.link(id, other_id, actor, &now)? {
+                writeln!(out, "Linked #{id} and #{other_id}")?;
+            } else {
+                writeln!(out, "#{id} and #{other_id} are already linked")?;
+            }
+            Ok(())
         }
         Command::Note(NoteCommand::Show(args)) => {
             let note = store
@@ -413,6 +461,39 @@ pub fn run(cli: Cli, context: &mut Context<'_>, streams: Streams<'_>) -> Result<
             writeln!(out, "Postponed #{id} to {date}")?;
             Ok(())
         }
+        Command::History {
+            command: None,
+            args,
+        } => {
+            let filter = HistoryFilter {
+                note: args.note,
+                person: args.person,
+            };
+            let entries = history(&conn, filter, args.limit)?;
+            if args.json {
+                output::json(out, &entries)
+            } else {
+                output::history(out, &entries)
+            }
+        }
+        Command::History {
+            command: Some(HistoryCommand::Undo { change_id }),
+            ..
+        } => {
+            let outcome = undo(&conn, change_id, actor, &now)?;
+            for warning in &outcome.warnings {
+                writeln!(err, "nv: {warning}")?;
+            }
+            if outcome.text_changed {
+                embed_in_background(context);
+            }
+            writeln!(
+                out,
+                "Undone #{}: {}",
+                outcome.change.id, outcome.description
+            )?;
+            Ok(())
+        }
         Command::People(command) => {
             let people = PeopleStore::new(&conn);
             match command {
@@ -494,6 +575,24 @@ pub fn run(cli: Cli, context: &mut Context<'_>, streams: Streams<'_>) -> Result<
             output::embedded(out, embedded)
         }
     }
+}
+
+/// Builds the new note of `nv add` and `nv note replace`; the body comes from stdin.
+fn draft(args: AddArgs, stdin: &mut dyn Read) -> Result<NoteDraft> {
+    Ok(NoteDraft::new(NoteFields {
+        title: args.title,
+        body: read_body(stdin)?,
+        area: args.area,
+        note_type: args.note_type,
+        project: args.project,
+        repos: args.repos,
+        tickets: args.tickets,
+        people: args.people,
+        source: Source::from_parts(args.source_kind, args.source_ref)?,
+        expires_on: args.expires_on,
+        owner: args.owner,
+        planned_for: args.planned_for,
+    })?)
 }
 
 /// A note with what the text output needs besides the note itself.

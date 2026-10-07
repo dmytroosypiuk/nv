@@ -228,7 +228,7 @@ mod tests {
     fn today_skips_outdated_and_expired_commitments() {
         let conn = database();
         let outdated = commit(&conn, "Send retry numbers", None, Some(TODAY));
-        // No command marks a note outdated before step 6.
+        // Only the status matters here; a real replace would add one more note.
         conn.execute(
             "UPDATE notes SET status = 'outdated' WHERE id = ?1",
             [outdated],

@@ -190,7 +190,7 @@ fn note_expires_the_day_after_expires_on() {
 fn candidate_knows_if_the_note_is_outdated() {
     let conn = db::open_in_memory().unwrap();
     let old = add_note(&conn, "Retry 3 times", "For billing.");
-    // No command marks a note outdated before step 6.
+    // Only the status matters here; a real replace would add one more note.
     conn.execute("UPDATE notes SET status = 'outdated' WHERE id = ?1", [old])
         .unwrap();
 

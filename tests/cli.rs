@@ -220,6 +220,9 @@ fn show_json_has_all_fields() {
             "owner_person_id": null,
             "planned_for": null,
             "closed_at": null,
+            "replaced_by": null,
+            "replaces": [],
+            "related": [],
             "created_at": MONDAY,
             "updated_at": MONDAY,
         })
@@ -1206,4 +1209,348 @@ fn merge_same_person_fails() {
         .assert()
         .code(1)
         .stderr("nv: person #99 not found\n");
+}
+
+// ----- replace, links, history, undo -----
+
+fn add_plain_note(nv_home: &TempDir, title: &str, now: &str) {
+    nv(nv_home)
+        .env("NV_NOW", now)
+        .args([
+            "add", "--title", title, "--area", "work", "--type", "decision",
+        ])
+        .write_stdin("Body.")
+        .assert()
+        .success();
+}
+
+fn replace_note(nv_home: &TempDir, old_id: &str, title: &str) {
+    nv(nv_home)
+        .args([
+            "note", "replace", old_id, "--title", title, "--area", "work",
+        ])
+        .args(["--type", "decision"])
+        .write_stdin("Body.")
+        .assert()
+        .success();
+}
+
+#[test]
+fn replace_output_and_search_output_shows_outdated_arrow_to_newer_note() {
+    let nv_home = TempDir::new().unwrap();
+    add_plain_note(&nv_home, "Retry 3 times", MONDAY);
+
+    nv(&nv_home)
+        .args([
+            "note",
+            "replace",
+            "1",
+            "--title",
+            "Retry 5 times for billing-api",
+        ])
+        .args(["--area", "work", "--type", "decision"])
+        .write_stdin("Agreed with Anna because of timeouts.")
+        .assert()
+        .success()
+        .stdout("Saved #2, replaces #1\n");
+
+    nv(&nv_home)
+        .args(["search", "retry"])
+        .assert()
+        .success()
+        .stdout(
+            "\
+#2  decision · work · 2026-10-06 · active
+    Retry 5 times for billing-api
+    replaces: #1
+
+#1  decision · work · 2026-10-05 · outdated → #2
+    Retry 3 times
+",
+        );
+    let old = stdout_json(nv(&nv_home).args(["note", "show", "1", "--json"]));
+    assert_eq!(old["status"], "outdated");
+    assert_eq!(old["replaced_by"], 2);
+    let new = stdout_json(nv(&nv_home).args(["note", "show", "2", "--json"]));
+    assert_eq!(new["replaces"], json!([1]));
+
+    nv(&nv_home)
+        .args([
+            "note",
+            "replace",
+            "1",
+            "--title",
+            "Retry 7 times",
+            "--area",
+            "work",
+        ])
+        .write_stdin("Body.")
+        .assert()
+        .code(1)
+        .stderr("nv: note #1 is already outdated, replaced by #2\n");
+    nv(&nv_home)
+        .args(["note", "delete", "2"])
+        .assert()
+        .code(1)
+        .stderr("nv: note #2 replaced #1: undo the replace, or replace #2\n");
+}
+
+#[test]
+fn show_output_lists_replaces_and_related() {
+    let nv_home = TempDir::new().unwrap();
+    add_plain_note(&nv_home, "Retry 3 times", MONDAY);
+    add_plain_note(&nv_home, "Retry budget", MONDAY);
+    add_plain_note(&nv_home, "Backoff", MONDAY);
+    replace_note(&nv_home, "1", "Retry 5 times");
+
+    nv(&nv_home)
+        .args(["note", "link", "4", "2"])
+        .assert()
+        .success()
+        .stdout("Linked #4 and #2\n");
+    nv(&nv_home)
+        .args(["note", "link", "3", "4"])
+        .assert()
+        .success();
+    nv(&nv_home)
+        .args(["note", "link", "2", "4"])
+        .assert()
+        .success()
+        .stdout("#2 and #4 are already linked\n");
+
+    nv(&nv_home)
+        .args(["note", "show", "4"])
+        .assert()
+        .success()
+        .stdout(
+            "\
+#4  decision · work · 2026-10-06 · active
+    Retry 5 times
+    replaces: #1 · related: #2, #3
+
+Body.
+",
+        );
+    let related = stdout_json(nv(&nv_home).args(["note", "show", "2", "--json"]));
+    assert_eq!(related["related"], json!([4]));
+}
+
+#[test]
+fn link_to_itself_fails() {
+    let nv_home = TempDir::new().unwrap();
+    add_plain_note(&nv_home, "Retry 3 times", MONDAY);
+
+    nv(&nv_home)
+        .args(["note", "link", "1", "1"])
+        .assert()
+        .code(1)
+        .stderr("nv: a note can never be linked to itself\n");
+    nv(&nv_home)
+        .args(["note", "link", "1", "99"])
+        .assert()
+        .code(1)
+        .stderr("nv: note #99 not found\n");
+}
+
+/// Changes #1 add, #2 person-add, #3 add, #4 replace, #5 edit.
+fn make_history(nv_home: &TempDir) {
+    add_plain_note(nv_home, "Retry 3 times", MONDAY);
+    nv(nv_home)
+        .env("NV_NOW", MONDAY)
+        .env("CLAUDECODE", "1")
+        .args(["people", "add", "Anna Nowak"])
+        .assert()
+        .success();
+    replace_note(nv_home, "1", "Retry 5 times");
+    nv(nv_home)
+        .env("NV_NOW", WEDNESDAY)
+        .env("CLAUDECODE", "1")
+        .args([
+            "note",
+            "edit",
+            "2",
+            "--title",
+            "Retry 5 times for billing-api",
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
+fn history_output_matches_golden_text() {
+    let nv_home = TempDir::new().unwrap();
+    make_history(&nv_home);
+
+    nv(&nv_home).arg("history").assert().success().stdout(
+        "\
+#5  2026-10-07 09:00  claude  edit        note #2  Retry 5 times for billing-api
+#4  2026-10-06 10:30  user    replace     note #1  Retry 3 times
+#3  2026-10-06 10:30  user    add         note #2  Retry 5 times for billing-api
+#2  2026-10-05 09:00  claude  person-add  person #1  Anna Nowak
+#1  2026-10-05 09:00  user    add         note #1  Retry 3 times
+",
+    );
+    nv(&nv_home)
+        .args(["history", "--note", "1", "--limit", "1"])
+        .assert()
+        .stdout("#4  2026-10-06 10:30  user  replace  note #1  Retry 3 times\n");
+    nv(&nv_home)
+        .args(["history", "--person", "1"])
+        .assert()
+        .stdout("#2  2026-10-05 09:00  claude  person-add  person #1  Anna Nowak\n");
+}
+
+#[test]
+fn history_of_an_empty_database_says_so() {
+    let nv_home = TempDir::new().unwrap();
+
+    nv(&nv_home)
+        .arg("history")
+        .assert()
+        .success()
+        .stdout("No changes yet.\n");
+    nv(&nv_home)
+        .args(["history", "undo"])
+        .assert()
+        .code(1)
+        .stderr("nv: nothing to undo\n");
+}
+
+#[test]
+fn history_json_has_action_subject_and_undone() {
+    let nv_home = TempDir::new().unwrap();
+    make_history(&nv_home);
+
+    let entries = stdout_json(nv(&nv_home).args(["history", "--limit", "2", "--json"]));
+
+    assert_eq!(
+        entries,
+        json!([
+            {
+                "id": 5, "at": WEDNESDAY, "actor": "claude", "action": "edit",
+                "subject": "note", "subject_id": 2,
+                "title": "Retry 5 times for billing-api", "undone": false,
+            },
+            {
+                "id": 4, "at": TUESDAY, "actor": "user", "action": "replace",
+                "subject": "note", "subject_id": 1, "title": "Retry 3 times", "undone": false,
+            },
+        ])
+    );
+}
+
+#[test]
+fn undo_last_change_then_history_shows_it_undone() {
+    let nv_home = TempDir::new().unwrap();
+    make_history(&nv_home);
+
+    nv_on_wednesday(&nv_home)
+        .args(["history", "undo"])
+        .assert()
+        .success()
+        .stdout("Undone #5: edit of note #2\n")
+        .stderr("");
+
+    nv(&nv_home)
+        .args(["history", "--limit", "2"])
+        .assert()
+        .stdout(
+            "\
+#6  2026-10-07 09:00  user    undo  note #2  Retry 5 times
+#5  2026-10-07 09:00  claude  edit  note #2  Retry 5 times  (undone)
+",
+        );
+    // The next undo takes the replace: the new note goes, the old one is true again.
+    nv_on_wednesday(&nv_home)
+        .args(["history", "undo"])
+        .assert()
+        .success()
+        .stdout("Undone #4: replace of note #1\n");
+    nv(&nv_home)
+        .args(["search", "--type", "decision"])
+        .assert()
+        .stdout(
+            "\
+#1  decision · work · 2026-10-05 · active
+    Retry 3 times
+",
+        );
+}
+
+#[test]
+fn undo_of_delete_brings_note_back_to_search() {
+    let nv_home = TempDir::new().unwrap();
+    add_retry_note(&nv_home);
+    nv(&nv_home)
+        .args(["note", "delete", "1"])
+        .assert()
+        .success();
+    nv(&nv_home)
+        .args(["search", "retry"])
+        .assert()
+        .stdout("No notes found.\n");
+
+    nv(&nv_home)
+        .args(["history", "undo", "2"])
+        .assert()
+        .success()
+        .stdout("Undone #2: delete of note #1\n");
+
+    nv(&nv_home)
+        .args(["search", "retry"])
+        .assert()
+        .stdout(predicate::str::starts_with(
+            "#1  decision · work · 2026-10-05 · active\n",
+        ));
+    let note = stdout_json(nv(&nv_home).args(["note", "show", "1", "--json"]));
+    assert_eq!(note["repos"], json!(["billing-api"]));
+    assert_eq!(note["tickets"], json!(["PAY-1234"]));
+}
+
+#[test]
+fn undo_older_change_is_refused_with_the_blocking_change_id() {
+    let nv_home = TempDir::new().unwrap();
+    make_history(&nv_home);
+
+    nv(&nv_home)
+        .args(["history", "undo", "4"])
+        .assert()
+        .code(1)
+        .stdout("")
+        .stderr("nv: note #2 changed after change #4: undo change #5 first\n");
+    nv(&nv_home)
+        .args(["history", "undo", "3"])
+        .assert()
+        .code(1)
+        .stderr("nv: note #2 changed after change #3: undo change #5 first\n");
+    nv(&nv_home)
+        .args(["history", "undo", "99"])
+        .assert()
+        .code(1)
+        .stderr("nv: change #99 not found\n");
+}
+
+#[test]
+fn undo_of_merge_warns_about_nothing_and_brings_person_back() {
+    let nv_home = TempDir::new().unwrap();
+    add_people(&nv_home);
+    nv(&nv_home)
+        .args(["people", "add", "Anna N."])
+        .assert()
+        .success();
+    nv(&nv_home)
+        .args(["people", "merge", "1", "3"])
+        .assert()
+        .success();
+
+    nv(&nv_home)
+        .args(["history", "undo"])
+        .assert()
+        .success()
+        .stdout("Undone #4: merge of person #1\n");
+
+    nv(&nv_home)
+        .args(["people", "search", "Anna N."])
+        .assert()
+        .stdout("#3  Anna N.\n");
 }
