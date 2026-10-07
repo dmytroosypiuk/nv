@@ -226,7 +226,7 @@ fn people_search_ignores_case_and_matches_part_of_a_name() {
     let nowak = add(&store, "Anna Nowak", None, &["anna.nowak@contoso.com"]);
     let kowalska = add(&store, "Anna Kowalska", None, &["Ania"]);
 
-    assert_eq!(store.search("NOWAK").unwrap(), [nowak.clone()]);
+    assert_eq!(store.search("NOWAK").unwrap(), std::slice::from_ref(&nowak));
     assert_eq!(store.search("contoso").unwrap(), [nowak]);
     assert_eq!(store.search("ani").unwrap(), [kowalska]);
     assert!(store.search("Piotr").unwrap().is_empty());
@@ -508,7 +508,7 @@ fn merge_with_unknown_person_fails_and_changes_nothing() {
         .unwrap_err();
     assert_eq!(error.to_string(), "person #99 not found");
 
-    assert_eq!(store.list().unwrap(), [anna.clone()]);
+    assert_eq!(store.list().unwrap(), std::slice::from_ref(&anna));
     assert_eq!(
         change_log::changes_of_person(&conn, anna.id).unwrap().len(),
         1

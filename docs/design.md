@@ -83,7 +83,6 @@ The spike confirmed the model and fixed how nv runs, stores and ranks (2026-10-0
 - **`nv model info`** shows model, dimensions, folder (found or missing) and how many notes are embedded and pending, without loading the model.
 - **No `active_model` in `meta` yet:** there is one model, a constant in the code. `embeddings.model` keeps vectors of different models apart for a later switch.
 - **Model test:** the pinned cosine (0.9094 for two fixed texts) fails with mean pooling (0.9016). The pinned ranking on the spike notes does not notice wrong pooling, so both tests are needed.
-- **Not built yet:** the `--person` filter comes with people; `--planned` works, but a planned date can only be set once commitments are built.
 
 **Decided while building commitments (step 4)**
 
@@ -97,6 +96,19 @@ The spike confirmed the model and fixed how nv runs, stores and ranks (2026-10-0
 - **A note that stops being a commitment** (edit of the type, only while `todo`) loses its owner and planned date.
 - **`closed_at`** is set by `done` and `drop`. The change log gets the actions `done`, `drop` and `postpone`, each with the state before.
 - **Commitment commands do not start the embedder:** the text of the note does not change.
+
+**Decided while building people (step 5)**
+
+- **New commands:** `nv people add "<name>" [--role R] [--alias A]...` (the design had no way to create a person) and `nv people edit <id> [--name N] [--role R]`. On a rename the old main name stays as an alias.
+- **Full or short alias:** an alias is full when it has more than one word or contains `@` ("Anna Nowak", "Anna N.", an email). One word is short ("Anna"). A full alias and every main name belong to one person; a short alias can belong to many. Names are compared without case.
+- **`nv people search "<text>"`** shows every person whose main name or an alias contains the text, with role and all aliases, by main name. No ranking: Claude picks, or asks.
+- **People on notes:** `--person <id>` many times on `nv add`; on `nv note edit` it replaces the list. Unknown IDs are refused. Text output shows names, JSON has `people: [1, 2]`.
+- **`nv search --person <id>`** finds notes linked to the person and commitments the person owns.
+- **Merge** `nv people merge <keep-id> <other-id>`: notes, owned commitments and aliases move to the kept person, the other main name becomes an alias, the other person is removed. The role of the kept person wins; without one, the other's is taken.
+- **Merge can be undone:** the change log entry holds both people as they were and the IDs of the notes that moved. `nv history undo` will call it.
+- **A person ID is never reused** (`AUTOINCREMENT`), for the same reason as note IDs.
+- **No `nv people delete`:** a wrong duplicate is fixed with merge.
+- **Change log:** a change is about a note or about a person (`person_id`, migration 0003). People actions: `person-add`, `person-edit`, `alias`, `merge`, `undo`.
 
 **Build**
 
@@ -332,10 +344,12 @@ nv commitment done <id>            # "Done #12"
 nv commitment drop <id>            # "Dropped #12"
 nv commitment postpone <id> <date> # "Postponed #12 to 2026-10-09"; also sets a first date
 
+nv people add "<name>" [--role R] [--alias A]...
+nv people edit <id> [--name N] [--role R]
 nv people list
-nv people search "<name>"
+nv people search "<text>"
 nv people alias <id> "<alias>"
-nv people merge <id> <id>          # by ID: names are not unique
+nv people merge <keep-id> <other-id>   # by ID: names are not unique
 
 nv history                         # change log
 nv history undo [<change-id>]
@@ -396,9 +410,16 @@ Nothing to show: `Nothing planned for today.`
 
 **Edit:** each flag replaces that field; `--repo` and `--ticket` replace the whole list. The body changes only with `--body`, which reads the new body from stdin.
 
-**Search filters**, all combinable: `--area`, `--type`, `--repo`, `--ticket`, `--person <id>`, `--since <date>`, `--planned <date>` (commitments planned for that date), `--all` (include expired), `--limit` (default 5). A search with only filters and no text is allowed, for example `nv search --ticket PAY-1234`; it does not load the model.
+**Search filters**, all combinable: `--area`, `--type`, `--repo`, `--ticket`, `--person <id>` (notes about the person and commitments they own), `--since <date>`, `--planned <date>` (commitments planned for that date), `--all` (include expired), `--limit` (default 5). A search with only filters and no text is allowed, for example `nv search --ticket PAY-1234`; it does not load the model.
 
 **People** are always addressed by ID; `nv people search` shows every match with aliases and role, so Claude sees which Anna before it links or merges.
+
+```
+#1  Anna Nowak · QA lead
+    aliases: Anna, anna.nowak@contoso.com
+#3  Anna Kowalska · backend developer
+    aliases: Anna, Ania
+```
 
 ## Database tables
 
@@ -440,7 +461,7 @@ CREATE TABLE note_repos   (note_id INTEGER NOT NULL REFERENCES notes(id) ON DELE
   repo TEXT NOT NULL, PRIMARY KEY (note_id, repo));
 CREATE TABLE note_tickets (note_id INTEGER NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
   ticket_id TEXT NOT NULL, PRIMARY KEY (note_id, ticket_id));
-CREATE TABLE people       (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, role TEXT);
+CREATE TABLE people       (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, role TEXT);
 CREATE TABLE person_aliases (person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
   alias TEXT NOT NULL, PRIMARY KEY (person_id, alias));  -- short aliases like 'Anna' may repeat
 CREATE TABLE note_people  (note_id INTEGER NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
@@ -463,8 +484,10 @@ CREATE VIRTUAL TABLE notes_fts USING fts5(title, body, content='notes', content_
 CREATE TABLE change_log (
   id INTEGER PRIMARY KEY, at TEXT NOT NULL,   -- injected, no SQL default
   actor TEXT NOT NULL,            -- 'claude' or 'user'
-  action TEXT NOT NULL,           -- 'add', 'edit', 'delete', 'restore', 'done', 'drop', 'postpone'
-  note_id INTEGER NOT NULL,
+  action TEXT NOT NULL,           -- 'add', 'edit', 'delete', 'restore', 'done', 'drop', 'postpone',
+                                  -- 'person-add', 'person-edit', 'alias', 'merge', 'undo'
+  note_id INTEGER, person_id INTEGER,   -- a change is about a note or about a person
+  CHECK (note_id IS NOT NULL OR person_id IS NOT NULL),
   before_json TEXT                -- old state, used by undo
 );
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);  -- schema version, active model
@@ -487,7 +510,7 @@ Design and the embedding spike are done; next is the CLI, then the Claude Code s
 - [x] CLI commands: names, input, output, search filters (session 2)
 - [x] Note template: required and optional fields, writing rules (session 2)
 - [x] Spike: bge-small-en-v1.5 in Rust with fastembed-rs, offline, on 25 real notes (`spikes/embedding/REPORT.md`)
-- [ ] Build the CLI (done: skeleton and schema, notes and change log, embeddings and hybrid search, commitments; next: people, links and history)
+- [ ] Build the CLI (done: skeleton and schema, notes and change log, embeddings and hybrid search, commitments, people; next: links, replace and history)
 - [ ] Write the Claude Code skill: when to save, when to search, saving rules, template
 - [ ] Check company rules for using Claude Code with project data
 

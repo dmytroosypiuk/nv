@@ -20,7 +20,7 @@ use crate::knowledge::change_log::{Action, Actor};
 use crate::knowledge::note::{
     Area, Note, NoteChanges, NoteDraft, NoteFields, NoteType, Source, SourceKind,
 };
-use crate::knowledge::people::person_name;
+use crate::knowledge::people::{PeopleStore, person_name};
 use crate::knowledge::store::NoteStore;
 use crate::search::embedder::ModelLoader;
 use crate::search::filter::NoteFilter;
@@ -49,9 +49,48 @@ enum Command {
     Commitment(CommitmentCommand),
     /// Shortcut for `nv commitment today`
     Today(TodayArgs),
+    /// People: main name, aliases, role. Always addressed by ID
+    #[command(subcommand)]
+    People(PeopleCommand),
     /// The embedding model and its index
     #[command(subcommand)]
     Model(ModelCommand),
+}
+
+#[derive(Debug, Subcommand)]
+enum PeopleCommand {
+    /// Add a person with their main name
+    Add {
+        name: String,
+        #[arg(long)]
+        role: Option<String>,
+        /// Another form of the name; can be given many times
+        #[arg(long = "alias")]
+        aliases: Vec<String>,
+    },
+    /// Change the main name or the role
+    Edit {
+        id: i64,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        role: Option<String>,
+    },
+    /// Show everyone
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show every person whose name or alias contains the text
+    Search {
+        text: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Add an alias to a person
+    Alias { id: i64, alias: String },
+    /// Make one person out of two: the second one moves into the first
+    Merge { keep_id: i64, other_id: i64 },
 }
 
 #[derive(Debug, Subcommand)]
@@ -122,6 +161,9 @@ struct AddArgs {
     /// Can be given many times
     #[arg(long = "ticket")]
     tickets: Vec<String>,
+    /// ID of a person who was involved; can be given many times
+    #[arg(long = "person")]
+    people: Vec<i64>,
     /// meeting, chat, email, ticket, web, repo or doc
     #[arg(long, requires = "source_ref")]
     source_kind: Option<SourceKind>,
@@ -168,6 +210,9 @@ struct EditArgs {
     /// Replaces all tickets of the note
     #[arg(long = "ticket")]
     tickets: Option<Vec<String>>,
+    /// Replaces all people of the note
+    #[arg(long = "person")]
+    people: Option<Vec<i64>>,
     #[arg(long, requires = "source_ref")]
     source_kind: Option<SourceKind>,
     #[arg(long, requires = "source_kind")]
@@ -193,7 +238,7 @@ struct DeleteArgs {
     clap::ArgGroup::new("what")
         .required(true)
         .multiple(true)
-        .args(["query", "area", "note_type", "repo", "ticket", "since", "planned"])
+        .args(["query", "area", "note_type", "repo", "ticket", "person", "since", "planned"])
 ))]
 struct SearchArgs {
     /// What to look for, in English. Can be left out when a filter is given
@@ -206,6 +251,9 @@ struct SearchArgs {
     repo: Option<String>,
     #[arg(long)]
     ticket: Option<String>,
+    /// ID of a person: notes about them and commitments they own
+    #[arg(long)]
+    person: Option<i64>,
     /// Notes created on or after this day, like 2026-10-01
     #[arg(long)]
     since: Option<Date>,
@@ -258,7 +306,7 @@ pub fn run(cli: Cli, context: &mut Context<'_>, streams: Streams<'_>) -> Result<
                 project: args.project,
                 repos: args.repos,
                 tickets: args.tickets,
-                people: Vec::new(),
+                people: args.people,
                 source: Source::from_parts(args.source_kind, args.source_ref)?,
                 expires_on: args.expires_on,
                 owner: args.owner,
@@ -287,7 +335,7 @@ pub fn run(cli: Cli, context: &mut Context<'_>, streams: Streams<'_>) -> Result<
                 project: args.project,
                 repos: args.repos,
                 tickets: args.tickets,
-                people: None,
+                people: args.people,
                 source: Source::from_parts(args.source_kind, args.source_ref)?,
                 expires_on: args.expires_on,
                 owner: args.owner,
@@ -308,7 +356,7 @@ pub fn run(cli: Cli, context: &mut Context<'_>, streams: Streams<'_>) -> Result<
                     note_type: args.note_type,
                     repo: args.repo,
                     ticket: args.ticket,
-                    person: None,
+                    person: args.person,
                     since: args.since,
                     planned: args.planned,
                     include_expired: args.all,
@@ -364,6 +412,39 @@ pub fn run(cli: Cli, context: &mut Context<'_>, streams: Streams<'_>) -> Result<
             })?;
             writeln!(out, "Postponed #{id} to {date}")?;
             Ok(())
+        }
+        Command::People(command) => {
+            let people = PeopleStore::new(&conn);
+            match command {
+                PeopleCommand::Add {
+                    name,
+                    role,
+                    aliases,
+                } => {
+                    let person = people.add(&name, role.as_deref(), &aliases, actor, &now)?;
+                    writeln!(out, "Added person #{}", person.id)?;
+                    Ok(())
+                }
+                PeopleCommand::Edit { id, name, role } => {
+                    people.edit(id, name.as_deref(), role.as_deref(), actor, &now)?;
+                    writeln!(out, "Edited person #{id}")?;
+                    Ok(())
+                }
+                PeopleCommand::List { json } => output::people(out, &people.list()?, json),
+                PeopleCommand::Search { text, json } => {
+                    output::people(out, &people.search(&text)?, json)
+                }
+                PeopleCommand::Alias { id, alias } => {
+                    people.add_alias(id, &alias, actor, &now)?;
+                    writeln!(out, "Added alias to person #{id}")?;
+                    Ok(())
+                }
+                PeopleCommand::Merge { keep_id, other_id } => {
+                    people.merge(keep_id, other_id, actor, &now)?;
+                    writeln!(out, "Merged person #{other_id} into #{keep_id}")?;
+                    Ok(())
+                }
+            }
         }
         Command::Model(ModelCommand::Info(args)) => {
             let model = context.loader.model();
@@ -421,7 +502,15 @@ fn shown(conn: &rusqlite::Connection, note: Note) -> Result<output::ShownNote> {
         Some(owner) => person_name(conn, owner)?,
         None => None,
     };
-    Ok(output::ShownNote { note, owner_name })
+    let mut people_names = Vec::new();
+    for &person in &note.people {
+        people_names.extend(person_name(conn, person)?);
+    }
+    Ok(output::ShownNote {
+        note,
+        owner_name,
+        people_names,
+    })
 }
 
 /// Starts embedding the saved note without waiting. If this fails, the note is still

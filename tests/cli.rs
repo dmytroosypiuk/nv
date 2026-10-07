@@ -215,6 +215,7 @@ fn show_json_has_all_fields() {
             "source": {"kind": "meeting", "ref": "Sprint planning"},
             "repos": ["billing-api"],
             "tickets": ["PAY-1234"],
+            "people": [],
             "expires_on": null,
             "owner_person_id": null,
             "planned_for": null,
@@ -583,14 +584,19 @@ fn embed_pending_is_hidden_from_help() {
 
 const WEDNESDAY: &str = "2026-10-07T09:00:00+02:00";
 
-/// People commands come in step 5: until then people are created in SQL.
+/// Person #1 Anna Nowak and person #2 Piotr Zielinski.
 fn add_people(nv_home: &TempDir) {
-    nv(nv_home).args(["model", "info"]).assert().success();
-    let conn = rusqlite::Connection::open(nv_home.path().join("nv.db")).unwrap();
-    conn.execute_batch(
-        "INSERT INTO people (id, name) VALUES (7, 'Anna Nowak'), (9, 'Piotr Zielinski');",
-    )
-    .unwrap();
+    nv(nv_home)
+        .args(["people", "add", "Anna Nowak", "--role", "QA lead"])
+        .args(["--alias", "Anna", "--alias", "anna.nowak@contoso.com"])
+        .assert()
+        .success()
+        .stdout("Added person #1\n");
+    nv(nv_home)
+        .args(["people", "add", "Piotr Zielinski"])
+        .assert()
+        .success()
+        .stdout("Added person #2\n");
 }
 
 fn add_commitment(nv_home: &TempDir, title: &str, flags: &[&str]) {
@@ -627,9 +633,9 @@ fn add_commitments(nv_home: &TempDir) {
     add_commitment(
         nv_home,
         "Review the retry PR",
-        &["--owner", "7", "--planned-for", "2026-10-08"],
+        &["--owner", "1", "--planned-for", "2026-10-08"],
     );
-    add_commitment(nv_home, "Send the staging access steps", &["--owner", "9"]);
+    add_commitment(nv_home, "Send the staging access steps", &["--owner", "2"]);
     add_commitment(nv_home, "Read the SQLite book", &[]);
     add_commitment(nv_home, "Clean the backlog", &[]);
 }
@@ -710,7 +716,7 @@ fn today_json_has_mine_owed_and_undated() {
     let owed = view["owed"].as_array().unwrap();
     assert_eq!(owed[0]["id"], 3);
     assert_eq!(owed[0]["owner_name"], "Anna Nowak");
-    assert_eq!(owed[0]["owner_person_id"], 7);
+    assert_eq!(owed[0]["owner_person_id"], 1);
 }
 
 #[test]
@@ -844,7 +850,7 @@ fn planned_for_without_commitment_type_fails() {
         .stderr("nv: only a commitment has a planned date: use --type commitment\n");
     nv(&nv_home)
         .args([
-            "add", "--title", "Exam", "--area", "learning", "--owner", "7",
+            "add", "--title", "Exam", "--area", "learning", "--owner", "1",
         ])
         .write_stdin("Body.")
         .assert()
@@ -886,7 +892,7 @@ Promised on the daily.
 ",
         );
     nv(&nv_home)
-        .args(["note", "edit", "3", "--owner", "9"])
+        .args(["note", "edit", "3", "--owner", "2"])
         .assert()
         .success();
     nv(&nv_home)
@@ -918,7 +924,7 @@ fn done_drop_and_postpone_are_in_the_change_log() {
     let mut statement = conn
         .prepare(
             "SELECT action, note_id, json_extract(before_json, '$.planned_for')
-             FROM change_log WHERE action NOT IN ('add') ORDER BY id",
+             FROM change_log WHERE action IN ('done', 'drop', 'postpone') ORDER BY id",
         )
         .unwrap();
     let log: Vec<(String, i64, Option<String>)> = statement
@@ -935,4 +941,269 @@ fn done_drop_and_postpone_are_in_the_change_log() {
             ("drop".to_string(), 2, Some("2026-10-05".to_string())),
         ]
     );
+}
+
+// ----- people -----
+
+#[test]
+fn people_add_then_list_matches_golden_text() {
+    let nv_home = TempDir::new().unwrap();
+    add_people(&nv_home);
+
+    nv(&nv_home)
+        .args(["people", "list"])
+        .assert()
+        .success()
+        .stdout(
+            "\
+#1  Anna Nowak · QA lead
+    aliases: Anna, anna.nowak@contoso.com
+#2  Piotr Zielinski
+",
+        );
+}
+
+#[test]
+fn people_search_output_matches_golden_text() {
+    let nv_home = TempDir::new().unwrap();
+    add_people(&nv_home);
+    nv(&nv_home)
+        .args([
+            "people",
+            "add",
+            "Anna Kowalska",
+            "--role",
+            "backend developer",
+        ])
+        .args(["--alias", "Anna", "--alias", "Ania"])
+        .assert()
+        .success();
+
+    // Both Annas, so Claude sees which one before it links or merges.
+    nv(&nv_home)
+        .args(["people", "search", "anna"])
+        .assert()
+        .success()
+        .stdout(
+            "\
+#3  Anna Kowalska · backend developer
+    aliases: Anna, Ania
+#1  Anna Nowak · QA lead
+    aliases: Anna, anna.nowak@contoso.com
+",
+        );
+}
+
+#[test]
+fn people_search_json_has_aliases_and_role() {
+    let nv_home = TempDir::new().unwrap();
+    add_people(&nv_home);
+
+    let found = stdout_json(nv(&nv_home).args(["people", "search", "nowak", "--json"]));
+
+    assert_eq!(
+        found,
+        json!([{
+            "id": 1,
+            "name": "Anna Nowak",
+            "role": "QA lead",
+            "aliases": ["Anna", "anna.nowak@contoso.com"],
+        }])
+    );
+}
+
+#[test]
+fn people_search_without_match_says_no_people_found() {
+    let nv_home = TempDir::new().unwrap();
+    add_people(&nv_home);
+
+    nv(&nv_home)
+        .args(["people", "search", "Katarzyna"])
+        .assert()
+        .success()
+        .stdout("No people found.\n");
+    let found = stdout_json(nv(&nv_home).args(["people", "search", "Katarzyna", "--json"]));
+    assert_eq!(found, json!([]));
+}
+
+#[test]
+fn alias_of_another_person_is_refused_with_their_id() {
+    let nv_home = TempDir::new().unwrap();
+    add_people(&nv_home);
+
+    nv(&nv_home)
+        .args(["people", "alias", "2", "anna.nowak@contoso.com"])
+        .assert()
+        .code(1)
+        .stderr("nv: alias 'anna.nowak@contoso.com' already belongs to person #1 Anna Nowak\n");
+    // A short alias can match two people.
+    nv(&nv_home)
+        .args(["people", "alias", "2", "Anna"])
+        .assert()
+        .success()
+        .stdout("Added alias to person #2\n");
+    nv(&nv_home)
+        .args(["people", "add", "anna nowak"])
+        .assert()
+        .code(1)
+        .stderr("nv: 'anna nowak' is already person #1 Anna Nowak\n");
+}
+
+#[test]
+fn people_edit_changes_role_and_name() {
+    let nv_home = TempDir::new().unwrap();
+    add_people(&nv_home);
+
+    nv(&nv_home)
+        .args([
+            "people",
+            "edit",
+            "2",
+            "--name",
+            "Piotr Zieliński",
+            "--role",
+            "DevOps",
+        ])
+        .assert()
+        .success()
+        .stdout("Edited person #2\n");
+
+    nv(&nv_home)
+        .args(["people", "search", "piotr"])
+        .assert()
+        .stdout(
+            "\
+#2  Piotr Zieliński · DevOps
+    aliases: Piotr Zielinski
+",
+        );
+    nv(&nv_home).args(["people", "edit", "2"]).assert().code(1);
+    nv(&nv_home)
+        .args(["people", "edit", "99", "--role", "x"])
+        .assert()
+        .code(1)
+        .stderr("nv: person #99 not found\n");
+}
+
+fn add_note_about(nv_home: &TempDir, title: &str, people: &[&str]) {
+    let mut command = nv(nv_home);
+    command.args(["add", "--title", title, "--area", "work", "--type", "fact"]);
+    for person in people {
+        command.args(["--person", person]);
+    }
+    command.write_stdin("Body.").assert().success();
+}
+
+#[test]
+fn add_note_with_people_shows_their_names() {
+    let nv_home = TempDir::new().unwrap();
+    add_people(&nv_home);
+    add_note_about(&nv_home, "Anna prefers async reviews", &["1", "2"]);
+
+    nv(&nv_home)
+        .args(["note", "show", "1"])
+        .assert()
+        .success()
+        .stdout(
+            "\
+#1  fact · work · 2026-10-06 · active
+    Anna prefers async reviews
+    people: Anna Nowak, Piotr Zielinski
+
+Body.
+",
+        );
+    let note = stdout_json(nv(&nv_home).args(["note", "show", "1", "--json"]));
+    assert_eq!(note["people"], json!([1, 2]));
+
+    nv(&nv_home)
+        .args(["note", "edit", "1", "--person", "2"])
+        .assert()
+        .success();
+    let note = stdout_json(nv(&nv_home).args(["note", "show", "1", "--json"]));
+    assert_eq!(note["people"], json!([2]));
+
+    nv(&nv_home)
+        .args([
+            "add", "--title", "Unknown", "--area", "work", "--person", "8",
+        ])
+        .write_stdin("Body.")
+        .assert()
+        .code(1)
+        .stderr("nv: person #8 not found\n");
+}
+
+#[test]
+fn search_by_person_finds_their_notes() {
+    let nv_home = TempDir::new().unwrap();
+    add_people(&nv_home);
+    add_note_about(&nv_home, "Anna prefers async reviews", &["1"]);
+    add_note_about(&nv_home, "Piotr owns the gateway", &["2"]);
+    add_commitment(&nv_home, "Review the retry PR", &["--owner", "1"]);
+
+    nv(&nv_home)
+        .args(["search", "--person", "1"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("Anna prefers async reviews")
+                .and(predicate::str::contains("Review the retry PR"))
+                .and(predicate::str::contains("Piotr owns the gateway").not()),
+        )
+        .stderr("");
+}
+
+#[test]
+fn merge_moves_notes_to_the_kept_person() {
+    let nv_home = TempDir::new().unwrap();
+    add_people(&nv_home);
+    nv(&nv_home)
+        .args(["people", "add", "Anna N.", "--alias", "Ania"])
+        .assert()
+        .success()
+        .stdout("Added person #3\n");
+    add_note_about(&nv_home, "Anna prefers async reviews", &["3"]);
+    add_commitment(&nv_home, "Review the retry PR", &["--owner", "3"]);
+
+    nv(&nv_home)
+        .args(["people", "merge", "1", "3"])
+        .assert()
+        .success()
+        .stdout("Merged person #3 into #1\n");
+
+    nv(&nv_home).args(["people", "list"]).assert().stdout(
+        "\
+#1  Anna Nowak · QA lead
+    aliases: Anna, anna.nowak@contoso.com, Anna N., Ania
+#2  Piotr Zielinski
+",
+    );
+    nv(&nv_home)
+        .args(["search", "--person", "1"])
+        .assert()
+        .stdout(
+            predicate::str::contains("people: Anna Nowak")
+                .and(predicate::str::contains("owner: Anna Nowak")),
+        );
+    nv(&nv_home)
+        .args(["search", "--person", "3"])
+        .assert()
+        .stdout("No notes found.\n");
+}
+
+#[test]
+fn merge_same_person_fails() {
+    let nv_home = TempDir::new().unwrap();
+    add_people(&nv_home);
+
+    nv(&nv_home)
+        .args(["people", "merge", "1", "1"])
+        .assert()
+        .code(1)
+        .stderr("nv: a person cannot be merged into itself\n");
+    nv(&nv_home)
+        .args(["people", "merge", "1", "99"])
+        .assert()
+        .code(1)
+        .stderr("nv: person #99 not found\n");
 }

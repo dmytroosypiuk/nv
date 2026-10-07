@@ -7,6 +7,7 @@ use serde::Serialize;
 
 use crate::commitments::today::TodayView;
 use crate::knowledge::note::{Note, NoteStatus};
+use crate::knowledge::person::Person;
 
 pub fn json(out: &mut dyn Write, value: &impl Serialize) -> Result<()> {
     serde_json::to_writer_pretty(&mut *out, value)?;
@@ -28,6 +29,7 @@ pub fn change(out: &mut dyn Write, what_happened: &str, note: &Note, as_json: bo
 pub struct ShownNote {
     pub note: Note,
     pub owner_name: Option<String>,
+    pub people_names: Vec<String>,
 }
 
 pub fn full_note(out: &mut dyn Write, shown: &ShownNote) -> Result<()> {
@@ -111,6 +113,33 @@ pub fn today(out: &mut dyn Write, view: &TodayView) -> Result<()> {
     Ok(())
 }
 
+/// Every person with role and all aliases, so Claude sees which Anna is which.
+pub fn people(out: &mut dyn Write, people: &[Person], as_json: bool) -> Result<()> {
+    if as_json {
+        return json(out, &people);
+    }
+    if people.is_empty() {
+        writeln!(out, "No people found.")?;
+    }
+    let id_width = people
+        .iter()
+        .map(|person| person.id.to_string().len())
+        .max()
+        .unwrap_or(1);
+    for person in people {
+        let role = person
+            .role
+            .as_ref()
+            .map_or(String::new(), |role| format!(" · {role}"));
+        writeln!(out, "#{:<id_width$}  {}{role}", person.id, person.name)?;
+        if !person.aliases.is_empty() {
+            let indent = " ".repeat(id_width + 3);
+            writeln!(out, "{indent}aliases: {}", person.aliases.join(", "))?;
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, Serialize)]
 pub struct ModelInfo<'a> {
     pub model: &'a str,
@@ -185,6 +214,9 @@ fn details(shown: &ShownNote) -> Vec<String> {
     }
     if !note.tickets.is_empty() {
         details.push(format!("tickets: {}", note.tickets.join(", ")));
+    }
+    if !shown.people_names.is_empty() {
+        details.push(format!("people: {}", shown.people_names.join(", ")));
     }
     if let Some(source) = &note.source {
         details.push(format!("source: {}, {}", source.kind, source.reference));
