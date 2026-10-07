@@ -1,6 +1,6 @@
 ---
 name: agentic-testing
-description: Test the nv skills (nv-capture, nv-recall) with a real Claude Code session, for example with Haiku, instead of by hand. Use when the user asks to run the hand test automatically, to check that a model loads the skills and writes good notes, or to repeat docs/skill-test.md after a change to a skill, to the CLAUDE.md lines or to the CLI.
+description: Test the nv skills (nv:capture, nv:recall) with a real Claude Code session, for example with Haiku, instead of by hand. Use when the user asks to run the hand test automatically, to check that a model loads the skills and writes good notes, or to repeat docs/skill-test.md after a change to a skill, to the CLAUDE.md lines or to the CLI.
 ---
 
 # Agentic testing of the nv skills
@@ -23,10 +23,10 @@ Does it write good notes with `nv`? A unit test cannot answer this. A model has 
    `nv history` in `~/.nv` must show only what the user saved.
 2. **The skills are installed.** `./install.sh --dry-run` first, then `./install.sh`, with
    the user's word. After a change to a skill, install again: the test reads
-   `~/.claude/skills`, not the repo.
+   the installed plugin, not the repo.
 3. **Permission prompts.** In the default permission mode, loading a skill asks the user.
    The user runs in auto mode and does not see it. A test session stops at that prompt.
-   Ask the user to add `Skill(nv-capture)` and `Skill(nv-recall)` to `permissions.allow`
+   Ask the user to add `Skill(nv:capture)` and `Skill(nv:recall)` to `permissions.allow`
    in `~/.claude/settings.json`. **Never approve prompts for the user by script.** The
    auto mode classifier blocks it ("Create Unsafe Agents"). Do not look for a way around.
    The driver denies every permission prompt and reports it.
@@ -65,7 +65,7 @@ The driver prints, from the session log: each message, the skill calls, the `nv`
 what the model said, whether the skill text was delivered, and the store afterwards.
 Check:
 
-1. **Loaded:** `SKILL nv-capture` after the first message. For a question, `nv-recall`.
+1. **Loaded:** `SKILL nv:capture` after the first message. For a question, `nv:recall`.
 2. **Not the memory:** no `Write` into `~/.claude/projects/.../memory`. Haiku does this when
    it does not call the skill, and then nothing is in nv.
 3. **One note for each item;** a promise by someone else has `--owner`; real dates; the

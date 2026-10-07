@@ -1,5 +1,5 @@
 ---
-name: nv-capture
+name: capture
 description: Save a note with the nv command. Do not ask for approval. Use when the user tells you a decision, a promise, the cause of a bug, a fact about a person or a procedure. Use also when the user says "remember" or "save this", or when a saved note must change.
 allowed-tools: Bash(nv *)
 ---
@@ -7,7 +7,7 @@ allowed-tools: Bash(nv *)
 **Do not `cd` into the base directory above.** It only says where the linked files are.
 Run `nv` from where you are. Do not add `2>/dev/null`.
 
-# nv-capture: save what is worth keeping
+# Capture: save what is worth keeping
 
 nv is the user's local notes store. You write the notes. What you do not save is lost.
 

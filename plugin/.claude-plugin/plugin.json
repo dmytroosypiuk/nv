@@ -1,0 +1,18 @@
+{
+  "name": "nv",
+  "displayName": "nv notes",
+  "version": "0.1.0",
+  "description": "A local, offline notes store for Claude Code: save decisions, promises and how-tos as short notes, and find them again by meaning and keyword.",
+  "author": {
+    "name": "dmytroosypiuk",
+    "url": "https://github.com/dmytroosypiuk"
+  },
+  "homepage": "https://github.com/dmytroosypiuk/nv",
+  "repository": "https://github.com/dmytroosypiuk/nv",
+  "keywords": [
+    "notes",
+    "memory",
+    "offline",
+    "knowledge"
+  ]
+}

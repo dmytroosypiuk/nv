@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Installs nv for the current user: the binary, the embedding model, the two Claude Code
-# skills, the permission to run nv and the nv lines in CLAUDE.md. No root needed. Never
-# touches nv.db. Running it again replaces what it installed before.
+# Developer install of nv for the current user, from this checkout: the binary, the
+# embedding model, the Claude Code plugin (the two skills) from this folder as a local
+# marketplace, the permissions and the nv lines in CLAUDE.md. No root needed. Never touches
+# nv.db. Running it again replaces what it installed before.
+# Other people install the plugin from GitHub: see README.md.
 #
 #   ./install.sh            install
 #   ./install.sh --dry-run  only print what would be done
@@ -9,8 +11,8 @@
 # Where things go (override with the env vars):
 #   NV_BIN_DIR         ~/.local/bin        the nv binary
 #   NV_HOME            ~/.nv               models/ (and later nv.db)
-#   CLAUDE_CONFIG_DIR  ~/.claude           skills/nv-recall, skills/nv-capture,
-#                                          settings.json, CLAUDE.md
+#   CLAUDE_CONFIG_DIR  ~/.claude           settings.json, CLAUDE.md (the plugin is
+#                                          installed by the claude CLI)
 set -euo pipefail
 
 dry_run=false
@@ -25,12 +27,19 @@ bin_dir="${NV_BIN_DIR:-$HOME/.local/bin}"
 nv_home="${NV_HOME:-$HOME/.nv}"
 claude_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 model="bge-small-en-v1.5"
-permission='Bash(nv:*)'
+marketplace='nv-marketplace'
+plugin="nv@$marketplace"
 
 run() {
   echo "+ $*"
   if ! $dry_run; then "$@"; fi
 }
+
+# 0. The plugin is installed through the claude CLI.
+if ! command -v claude >/dev/null; then
+  echo "error: the claude CLI is not on your PATH" >&2
+  exit 1
+fi
 
 # 1. Another program called nv must not be replaced or shadowed by surprise.
 if other="$(command -v nv 2>/dev/null)" && [[ "$other" != "$bin_dir/nv" ]]; then
@@ -57,32 +66,45 @@ echo "== model -> $nv_home/models/$model"
 run mkdir -p "$nv_home/models/$model"
 run cp -u "$repo/models/$model/"* "$nv_home/models/$model/"
 
-for skill in nv-recall nv-capture; do
-  echo "== skill -> $claude_dir/skills/$skill"
-  run mkdir -p "$claude_dir/skills"
-  run rm -rf "$claude_dir/skills/$skill"
-  run cp -r "$repo/claude/skills/$skill" "$claude_dir/skills/$skill"
+# The skills are in the plugin now. Earlier versions copied them into the skills folder,
+# and Claude would see both: remove those copies.
+for old in nv nv-recall nv-capture; do
+  if [[ -d "$claude_dir/skills/$old" ]]; then
+    echo "== old standalone skill, removed: $claude_dir/skills/$old"
+    run rm -r "$claude_dir/skills/$old"
+  fi
 done
-# The one skill of earlier versions was split into the two above.
-if [[ -d "$claude_dir/skills/nv" ]]; then
-  echo "== old skill, no longer used"
-  run rm -r "$claude_dir/skills/nv"
+
+echo "== plugin $plugin from $repo"
+if claude plugin marketplace list 2>/dev/null | grep -q "$marketplace"; then
+  run claude plugin marketplace update "$marketplace"
+else
+  run claude plugin marketplace add "$repo"
+fi
+if claude plugin list 2>/dev/null | grep -q "$plugin"; then
+  run claude plugin update "$plugin"
+else
+  run claude plugin install "$plugin"
 fi
 
-echo "== permission $permission -> $claude_dir/settings.json"
+# A plugin cannot add permission rules: the user's settings must hold them.
+snippet_settings="$repo/claude/settings.snippet.json"
 settings="$claude_dir/settings.json"
+echo "== permissions $(jq -r '.permissions.allow | join(", ")' "$snippet_settings" 2>/dev/null || echo "(see claude/settings.snippet.json)") -> $settings"
 if [[ ! -e "$settings" ]]; then
-  run cp "$repo/claude/settings.snippet.json" "$settings"
+  run cp "$snippet_settings" "$settings"
 elif ! command -v jq >/dev/null; then
-  echo "jq is not installed: add \"$permission\" to permissions.allow in $settings yourself"
-elif jq -e --arg p "$permission" '(.permissions.allow // []) | index($p)' "$settings" >/dev/null; then
+  echo "jq is not installed: add the rules of $snippet_settings to permissions.allow in $settings yourself"
+elif jq -e --argjson want "$(jq -c '.permissions.allow' "$snippet_settings")" \
+    '(.permissions.allow // []) as $have | $want | all(. as $p | $have | index($p))' "$settings" >/dev/null; then
   echo "already there"
 else
-  # Only permissions.allow gets one more entry; everything else stays as it is.
+  # Only permissions.allow gets the missing entries; everything else stays as it is.
   run cp "$settings" "$settings.before-nv"
-  echo "+ add \"$permission\" to permissions.allow"
+  echo "+ add the missing rules to permissions.allow"
   if ! $dry_run; then
-    jq --arg p "$permission" '.permissions.allow = ((.permissions.allow // []) + [$p])' \
+    jq --argjson want "$(jq -c '.permissions.allow' "$snippet_settings")" \
+      '.permissions.allow = ((.permissions.allow // []) as $have | $have + ($want - $have))' \
       "$settings.before-nv" > "$settings"
   fi
 fi

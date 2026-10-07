@@ -1,0 +1,21 @@
+{
+  "name": "nv-marketplace",
+  "description": "nv: a local, offline notes store for Claude Code",
+  "owner": {
+    "name": "dmytroosypiuk",
+    "url": "https://github.com/dmytroosypiuk"
+  },
+  "plugins": [
+    {
+      "name": "nv",
+      "source": "./plugin",
+      "description": "Save decisions, promises and how-tos as short notes, and find them again by meaning and keyword. Everything stays on the laptop.",
+      "category": "productivity",
+      "tags": [
+        "notes",
+        "memory",
+        "offline"
+      ]
+    }
+  ]
+}

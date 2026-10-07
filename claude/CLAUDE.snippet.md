@@ -2,6 +2,6 @@
 ## nv (notes store)
 You have `nv`, the user's local notes store. When the user states a decision, makes or
 receives a promise, finds a root cause or shares a how-to, save it right away with the
-nv-capture skill. Before answering about past decisions, promises, people or plans,
-search with the nv-recall skill.
+nv:capture skill. Before answering about past decisions, promises, people or plans,
+search with the nv:recall skill.
 # nv:end

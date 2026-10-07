@@ -65,7 +65,7 @@ fn help_of(command: &str) -> String {
 /// The two skills and the commands each one must show, in `SKILL.md` or a file next to it.
 const SKILLS: [(&str, &[&str]); 2] = [
     (
-        "nv-recall",
+        "recall",
         &[
             "nv date",
             "nv search ",
@@ -77,7 +77,7 @@ const SKILLS: [(&str, &[&str]); 2] = [
         ],
     ),
     (
-        "nv-capture",
+        "capture",
         &[
             "nv date",
             "nv search ",
@@ -100,7 +100,7 @@ const SKILLS: [(&str, &[&str]); 2] = [
 
 fn skill_dir(skill: &str) -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("claude/skills")
+        .join("plugin/skills")
         .join(skill)
 }
 
@@ -120,7 +120,7 @@ fn whole_skill(skill: &str) -> String {
 }
 
 fn skill_md(skill: &str) -> String {
-    repo_file(&format!("claude/skills/{skill}/SKILL.md"))
+    repo_file(&format!("plugin/skills/{skill}/SKILL.md"))
 }
 
 #[test]
@@ -192,9 +192,9 @@ fn skills_use_only_commands_and_flags_that_exist() {
 #[test]
 fn skill_files_linked_from_skill_md_exist() {
     for (skill, linked) in [
-        ("nv-recall", vec!["cli-read.md"]),
+        ("recall", vec!["cli-read.md"]),
         (
-            "nv-capture",
+            "capture",
             vec!["saving-rules.md", "template.md", "cli-write.md"],
         ),
     ] {
@@ -216,17 +216,21 @@ fn skill_files_linked_from_skill_md_exist() {
 }
 
 #[test]
-fn old_nv_skill_is_gone() {
+fn skills_live_in_the_plugin_only() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+
+    // Before the plugin the skills were copied from here by install.sh.
+    assert!(!root.join("claude/skills").exists());
     assert!(!skill_dir("nv").exists());
 }
 
 #[test]
 fn skills_tell_the_rules_that_nv_cannot_check() {
-    let recall = skill_md("nv-recall").to_lowercase();
-    let capture = skill_md("nv-capture").to_lowercase();
+    let recall = skill_md("recall").to_lowercase();
+    let capture = skill_md("capture").to_lowercase();
 
     // The small shared rules are written in both, not linked.
-    for (skill, text) in [("nv-recall", &recall), ("nv-capture", &capture)] {
+    for (skill, text) in [("recall", &recall), ("capture", &capture)] {
         for rule in ["english", "real date", "by id"] {
             assert!(text.contains(rule), "{skill} does not mention: {rule}");
         }
@@ -238,7 +242,7 @@ fn skills_tell_the_rules_that_nv_cannot_check() {
         "run `nv date`",
         "do not `cd`",
     ] {
-        assert!(recall.contains(rule), "nv-recall does not mention: {rule}");
+        assert!(recall.contains(rule), "recall does not mention: {rule}");
     }
     for rule in [
         "<<'eof'",
@@ -247,10 +251,7 @@ fn skills_tell_the_rules_that_nv_cannot_check() {
         "planned for fri 2026-10-09",
         "flags you give override the copied fields",
     ] {
-        assert!(
-            capture.contains(rule),
-            "nv-capture does not mention: {rule}"
-        );
+        assert!(capture.contains(rule), "capture does not mention: {rule}");
     }
 }
 
@@ -258,7 +259,7 @@ fn skills_tell_the_rules_that_nv_cannot_check() {
 /// needs must be there. Found in the hand test with Haiku (2026-10-07).
 #[test]
 fn capture_skill_md_alone_is_enough_for_a_correct_note() {
-    let capture = skill_md("nv-capture");
+    let capture = skill_md("capture");
 
     for word in [
         "`decision`",
@@ -301,7 +302,7 @@ fn capture_skill_md_alone_is_enough_for_a_correct_note() {
 
 #[test]
 fn capture_carries_the_temporary_company_data_rule() {
-    let capture = skill_md("nv-capture");
+    let capture = skill_md("capture");
     let one_line = capture.split_whitespace().collect::<Vec<_>>().join(" ");
 
     assert!(one_line.contains(
@@ -314,7 +315,7 @@ fn capture_carries_the_temporary_company_data_rule() {
 
 #[test]
 fn capture_examples_use_add_and_remove_flags_and_planned() {
-    let capture = nv_commands(&whole_skill("nv-capture")).join("\n");
+    let capture = nv_commands(&whole_skill("capture")).join("\n");
 
     for flag in [
         "--add-repo",
@@ -335,13 +336,13 @@ fn claude_md_snippet_has_markers_and_names_both_skills() {
 
     assert!(snippet.starts_with("# nv:start\n"), "{snippet}");
     assert!(snippet.ends_with("# nv:end\n"), "{snippet}");
-    for word in ["nv-capture", "nv-recall", "`nv`"] {
+    for word in ["nv:capture", "nv:recall", "`nv`"] {
         assert!(snippet.contains(word), "the snippet does not name {word}");
     }
 }
 
 /// The skill for developers of nv, in `.claude/skills` (read by Claude Code in this
-/// project). It is not installed: `claude/skills` holds the skills of the product.
+/// project). It is not installed: `plugin/skills` holds the skills of the product.
 #[test]
 fn agentic_testing_skill_is_a_project_skill_with_its_driver() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(".claude/skills/agentic-testing");
@@ -380,7 +381,7 @@ fn agentic_testing_skill_is_a_project_skill_with_its_driver() {
     assert!(dir.join("scripts/pty_run.py").is_file());
     assert!(
         !Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("claude/skills/agentic-testing")
+            .join("plugin/skills/agentic-testing")
             .exists()
     );
     assert!(
@@ -395,7 +396,7 @@ fn settings_snippet_allows_nv_and_has_no_hook() {
 
     assert_eq!(
         snippet["permissions"]["allow"],
-        serde_json::json!(["Bash(nv:*)"])
+        serde_json::json!(["Bash(nv:*)", "Skill(nv:capture)", "Skill(nv:recall)"])
     );
     // Decided in step 7: no SessionStart hook.
     assert!(snippet.get("hooks").is_none());

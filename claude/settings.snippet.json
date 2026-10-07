@@ -1,5 +1,9 @@
 {
   "permissions": {
-    "allow": ["Bash(nv:*)"]
+    "allow": [
+      "Bash(nv:*)",
+      "Skill(nv:capture)",
+      "Skill(nv:recall)"
+    ]
   }
 }

@@ -1,5 +1,5 @@
 ---
-name: nv-recall
+name: recall
 description: Search the user's notes with the nv command before you answer. Use when the user asks about a past decision, a promise, a person, a setup, a cause or a plan.
 allowed-tools: Bash(nv *)
 ---
@@ -7,7 +7,7 @@ allowed-tools: Bash(nv *)
 **Do not `cd` into the base directory above.** It only says where the linked files are.
 Run `nv` from where you are. Do not add `2>/dev/null`.
 
-# nv-recall: search the user's notes before you answer
+# Recall: search the user's notes before you answer
 
 nv is the user's local notes store: decisions, commitments, how-tos, facts and ideas from
 work, learning and personal life. The user told these things to Claude once. If you

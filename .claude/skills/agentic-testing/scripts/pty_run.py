@@ -147,7 +147,7 @@ for entry in log:
     attachment = entry.get("attachment", {})
     if attachment.get("type") == "skill_listing":
         listing = attachment.get("content", "")
-        for skill in ("nv-capture", "nv-recall"):
+        for skill in ("nv:capture", "nv:recall"):
             line = next((l for l in listing.splitlines() if l.startswith(f"- {skill}")), "")
             described = line.startswith(f"- {skill}:")
             print(f"  listing: {skill} {'has a description' if described else 'NAMES ONLY'}")
@@ -158,7 +158,7 @@ for entry in log:
         number += 1
         print(f"\n== message {number}: {content[:80]}")
     elif entry.get("type") == "user" and entry.get("isMeta") and isinstance(content, list):
-        if "nv-capture" in json.dumps(content) or "nv-recall" in json.dumps(content):
+        if "Base directory for this skill" in json.dumps(content):
             print("  (skill text delivered)")
     elif entry.get("type") == "assistant" and isinstance(content, list):
         for block in content:
