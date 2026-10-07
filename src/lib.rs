@@ -7,3 +7,6 @@ pub mod config;
 pub mod db;
 pub mod knowledge;
 pub mod search;
+
+#[cfg(test)]
+mod test_support;
