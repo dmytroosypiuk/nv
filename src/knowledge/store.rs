@@ -18,6 +18,11 @@ impl<'c> NoteStore<'c> {
     }
 
     pub fn add(&self, draft: &NoteDraft, actor: Actor, now: &Now) -> Result<Note> {
+        self.in_transaction(|| self.add_unlogged_tx(draft, actor, now))
+    }
+
+    /// `add` without its own transaction, for commands that do more in one transaction.
+    fn add_unlogged_tx(&self, draft: &NoteDraft, actor: Actor, now: &Now) -> Result<Note> {
         let mut note = Note {
             id: 0,
             title: draft.title.clone(),
@@ -42,10 +47,8 @@ impl<'c> NoteStore<'c> {
             updated_at: now.timestamp(),
         };
         self.check_people(&note)?;
-        let tx = self.conn.unchecked_transaction()?;
-        note.id = insert(&tx, &note, None)?;
-        change_log::record(&tx, now, actor, Action::Add, note.id, None)?;
-        tx.commit()?;
+        note.id = insert(self.conn, &note, None)?;
+        change_log::record(self.conn, now, actor, Action::Add, note.id, None)?;
         Ok(note)
     }
 
@@ -123,9 +126,25 @@ impl<'c> NoteStore<'c> {
             owner: row.owner,
             planned_for: row.planned_for.map(|date| date.parse()).transpose()?,
             closed_at: row.closed_at,
-            replaced_by: None,
-            replaces: Vec::new(),
-            related: Vec::new(),
+            replaced_by: self
+                .note_ids(
+                    "SELECT to_id FROM note_links WHERE from_id = ?1 AND kind = 'replaced_by'",
+                    id,
+                )?
+                .pop(),
+            replaces: self.note_ids(
+                "SELECT from_id FROM note_links WHERE to_id = ?1 AND kind = 'replaced_by'
+                 ORDER BY from_id",
+                id,
+            )?,
+            // A related link has no direction: it is stored once and read from both ends.
+            related: self.note_ids(
+                "SELECT to_id AS other FROM note_links WHERE from_id = ?1 AND kind = 'related'
+                 UNION
+                 SELECT from_id FROM note_links WHERE to_id = ?1 AND kind = 'related'
+                 ORDER BY other",
+                id,
+            )?,
             created_at: row.created_at,
             updated_at: row.updated_at,
         }))
@@ -147,13 +166,26 @@ impl<'c> NoteStore<'c> {
         now: &Now,
         rule: impl FnOnce(&Note) -> Result<Note>,
     ) -> Result<Note> {
+        self.in_transaction(|| self.apply(id, action, actor, now, rule))
+    }
+
+    /// `change` without its own transaction.
+    pub(super) fn apply(
+        &self,
+        id: i64,
+        action: Action,
+        actor: Actor,
+        now: &Now,
+        rule: impl FnOnce(&Note) -> Result<Note>,
+    ) -> Result<Note> {
         let before = self.existing(id)?;
         let mut after = rule(&before)?;
         after.updated_at = now.timestamp();
+        after.check_links()?;
         self.check_people(&after)?;
 
-        let tx = self.conn.unchecked_transaction()?;
-        tx.execute(
+        let conn = self.conn;
+        conn.execute(
             "UPDATE notes SET
                 title = :title, body = :body, area = :area, type = :type, project = :project,
                 status = :status, commitment_status = :commitment_status,
@@ -179,23 +211,52 @@ impl<'c> NoteStore<'c> {
                 ":updated_at": after.updated_at,
             },
         )?;
-        tx.execute("DELETE FROM note_repos WHERE note_id = ?1", [id])?;
-        tx.execute("DELETE FROM note_tickets WHERE note_id = ?1", [id])?;
-        tx.execute("DELETE FROM note_people WHERE note_id = ?1", [id])?;
-        insert_repos_tickets_and_people(&tx, &after)?;
-        change_log::record(&tx, now, actor, action, id, Some(&before))?;
-        tx.commit()?;
+        conn.execute("DELETE FROM note_repos WHERE note_id = ?1", [id])?;
+        conn.execute("DELETE FROM note_tickets WHERE note_id = ?1", [id])?;
+        conn.execute("DELETE FROM note_people WHERE note_id = ?1", [id])?;
+        insert_repos_tickets_and_people(conn, &after)?;
+        write_links(conn, &after)?;
+        change_log::record(conn, now, actor, action, id, Some(&before))?;
         Ok(after)
+    }
+
+    /// Saves a newer note that says what is true now: the old note becomes outdated and
+    /// gets a `replaced_by` link to it. Returns the new note.
+    pub fn replace(&self, old_id: i64, draft: &NoteDraft, actor: Actor, now: &Now) -> Result<Note> {
+        self.in_transaction(|| {
+            self.existing(old_id)?;
+            let new = self.add_unlogged_tx(draft, actor, now)?;
+            self.apply(old_id, Action::Replace, actor, now, |old| {
+                Ok(old.replaced_by_note(new.id)?)
+            })?;
+            self.existing(new.id)
+        })
+    }
+
+    /// Links two notes as related. Returns false when they were linked already.
+    pub fn link(&self, id: i64, other_id: i64, actor: Actor, now: &Now) -> Result<bool> {
+        let note = self.existing(id)?;
+        let linked = note.linked_to(other_id)?;
+        self.existing(other_id)?;
+        if linked == note {
+            return Ok(false);
+        }
+        self.change(id, Action::Link, actor, now, |_| Ok(linked))?;
+        Ok(true)
     }
 
     /// Removes the note; the change log keeps it. Returns the deleted note.
     pub fn delete(&self, id: i64, actor: Actor, now: &Now) -> Result<Note> {
         let before = self.existing(id)?;
-        let tx = self.conn.unchecked_transaction()?;
-        tx.execute("DELETE FROM notes WHERE id = ?1", [id])?;
-        change_log::record(&tx, now, actor, Action::Delete, id, Some(&before))?;
-        tx.commit()?;
-        Ok(before)
+        if let Some(replaced) = before.replaces.first() {
+            // Otherwise that note would stay outdated with nothing saying what is true now.
+            bail!("note #{id} replaced #{replaced}: undo the replace, or replace #{id}");
+        }
+        self.in_transaction(|| {
+            self.remove(id)?;
+            change_log::record(self.conn, now, actor, Action::Delete, id, Some(&before))?;
+            Ok(before)
+        })
     }
 
     /// Brings back the note that change `change_id` deleted, with its old ID.
@@ -206,14 +267,51 @@ impl<'c> NoteStore<'c> {
             (Action::Delete, Some(note)) => note,
             _ => bail!("change #{change_id} is not a deletion"),
         };
+        self.in_transaction(|| {
+            let note = self.put_back(&note)?;
+            change_log::record(self.conn, now, actor, Action::Restore, note.id, None)?;
+            Ok(note)
+        })
+    }
+
+    /// Deletes the row of a note, with nothing written to the change log.
+    pub(super) fn remove(&self, id: i64) -> Result<()> {
+        self.conn.execute("DELETE FROM notes WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    /// Inserts a note that is not in the database under its old ID, with its links to
+    /// notes that still exist. Nothing is written to the change log.
+    pub(super) fn put_back(&self, note: &Note) -> Result<Note> {
         if self.get(note.id)?.is_some() {
             bail!("note #{} already exists", note.id);
         }
+        let mut note = note.clone();
+        // The newer note may be gone; then this note is what is true again.
+        if let Some(newer) = note.replaced_by
+            && self.get(newer)?.is_none()
+        {
+            note.replaced_by = None;
+            note.status = NoteStatus::Active;
+        }
+        self.check_people(&note)?;
+        insert(self.conn, &note, Some(note.id))?;
+        write_links(self.conn, &note)?;
+        self.existing(note.id)
+    }
+
+    /// Runs `work` in one transaction: all of it is saved, or nothing.
+    pub(super) fn in_transaction<T>(&self, work: impl FnOnce() -> Result<T>) -> Result<T> {
         let tx = self.conn.unchecked_transaction()?;
-        insert(&tx, &note, Some(note.id))?;
-        change_log::record(&tx, now, actor, Action::Restore, note.id, None)?;
+        let result = work()?;
         tx.commit()?;
-        Ok(note)
+        Ok(result)
+    }
+
+    fn note_ids(&self, sql: &str, note_id: i64) -> Result<Vec<i64>> {
+        let mut statement = self.conn.prepare(sql)?;
+        let ids = statement.query_map([note_id], |row| row.get(0))?;
+        Ok(ids.collect::<rusqlite::Result<_>>()?)
     }
 
     fn existing(&self, id: i64) -> Result<Note> {
@@ -268,6 +366,33 @@ fn insert(conn: &Connection, note: &Note, id: Option<i64>) -> Result<i64> {
     let id = conn.last_insert_rowid();
     insert_repos_tickets_and_people(conn, &Note { id, ..note.clone() })?;
     Ok(id)
+}
+
+/// Writes the outgoing `replaced_by` link and the `related` links of a note. Links to
+/// notes that do not exist are left out.
+fn write_links(conn: &Connection, note: &Note) -> Result<()> {
+    conn.execute(
+        "DELETE FROM note_links
+         WHERE (from_id = ?1 AND kind = 'replaced_by')
+            OR (kind = 'related' AND (from_id = ?1 OR to_id = ?1))",
+        [note.id],
+    )?;
+    if let Some(newer) = note.replaced_by {
+        conn.execute(
+            "INSERT INTO note_links (from_id, to_id, kind)
+             SELECT ?1, id, 'replaced_by' FROM notes WHERE id = ?2",
+            rusqlite::params![note.id, newer],
+        )?;
+    }
+    for &other in &note.related {
+        // Stored once, from the smaller ID to the bigger one.
+        conn.execute(
+            "INSERT OR IGNORE INTO note_links (from_id, to_id, kind)
+             SELECT ?1, ?2, 'related' WHERE EXISTS (SELECT 1 FROM notes WHERE id = ?3)",
+            rusqlite::params![note.id.min(other), note.id.max(other), other],
+        )?;
+    }
+    Ok(())
 }
 
 fn insert_repos_tickets_and_people(conn: &Connection, note: &Note) -> Result<()> {

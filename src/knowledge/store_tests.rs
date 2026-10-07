@@ -573,3 +573,265 @@ fn deleted_note_is_restored_with_its_people() {
     assert_eq!(restored.people, [7]);
     assert_eq!(store.get(added.id).unwrap(), Some(added));
 }
+
+// ----- replace and links -----
+
+fn draft(title: &str) -> NoteDraft {
+    NoteDraft::new(NoteFields {
+        title: title.into(),
+        ..retry_fields()
+    })
+    .unwrap()
+}
+
+fn note_count(conn: &rusqlite::Connection) -> i64 {
+    conn.query_row("SELECT count(*) FROM notes", [], |row| row.get(0))
+        .unwrap()
+}
+
+fn actions(conn: &rusqlite::Connection, note_id: i64) -> Vec<Action> {
+    change_log::changes_of_note(conn, note_id)
+        .unwrap()
+        .iter()
+        .map(|change| change.action)
+        .collect()
+}
+
+#[test]
+fn replace_marks_old_outdated_and_links_it() {
+    let conn = db::open_in_memory().unwrap();
+    let store = NoteStore::new(&conn);
+    let old = store
+        .add(&draft("Retry 3 times"), Actor::Claude, &at(MONDAY))
+        .unwrap();
+
+    let new = store
+        .replace(old.id, &draft("Retry 5 times"), Actor::Claude, &at(TUESDAY))
+        .unwrap();
+
+    assert_eq!(new.title, "Retry 5 times");
+    assert_eq!(new.status, NoteStatus::Active);
+    assert_eq!(new.replaces, [old.id]);
+    assert_eq!(new.created_at, TUESDAY);
+    assert_eq!(store.get(new.id).unwrap(), Some(new.clone()));
+    let old_now = store.get(old.id).unwrap().unwrap();
+    assert_eq!(
+        old_now,
+        Note {
+            status: NoteStatus::Outdated,
+            replaced_by: Some(new.id),
+            updated_at: TUESDAY.into(),
+            ..old.clone()
+        }
+    );
+    // Both changes are in the log, the old note with its state before.
+    assert_eq!(actions(&conn, new.id), [Action::Add]);
+    assert_eq!(actions(&conn, old.id), [Action::Add, Action::Replace]);
+    let replace = change_log::changes_of_note(&conn, old.id)
+        .unwrap()
+        .pop()
+        .unwrap();
+    assert_eq!(replace.note_before().unwrap(), Some(old));
+}
+
+#[test]
+fn replace_of_outdated_note_is_refused() {
+    let conn = db::open_in_memory().unwrap();
+    let store = NoteStore::new(&conn);
+    let old = store
+        .add(&draft("Retry 3 times"), Actor::Claude, &at(MONDAY))
+        .unwrap();
+    let new = store
+        .replace(old.id, &draft("Retry 5 times"), Actor::Claude, &at(TUESDAY))
+        .unwrap();
+
+    let error = store
+        .replace(old.id, &draft("Retry 7 times"), Actor::Claude, &at(TUESDAY))
+        .unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "note #{} is already outdated, replaced by #{}",
+            old.id, new.id
+        )
+    );
+}
+
+#[test]
+fn replace_saves_new_note_and_old_change_in_one_transaction() {
+    let conn = db::open_in_memory().unwrap();
+    let store = NoteStore::new(&conn);
+    let old = store
+        .add(&draft("Retry 3 times"), Actor::Claude, &at(MONDAY))
+        .unwrap();
+    store
+        .replace(old.id, &draft("Retry 5 times"), Actor::Claude, &at(TUESDAY))
+        .unwrap();
+    let notes_before = note_count(&conn);
+
+    // The old note cannot be replaced again, so the new note must not be saved either.
+    assert!(
+        store
+            .replace(old.id, &draft("Retry 7 times"), Actor::Claude, &at(TUESDAY))
+            .is_err()
+    );
+    assert!(
+        store
+            .replace(99, &draft("Retry 7 times"), Actor::Claude, &at(TUESDAY))
+            .is_err()
+    );
+
+    assert_eq!(note_count(&conn), notes_before);
+    assert_eq!(actions(&conn, old.id), [Action::Add, Action::Replace]);
+    // And the connection is usable again: no transaction was left open.
+    store
+        .add(&draft("Another note"), Actor::Claude, &at(TUESDAY))
+        .unwrap();
+}
+
+#[test]
+fn related_link_shows_on_both_notes() {
+    let conn = db::open_in_memory().unwrap();
+    let store = NoteStore::new(&conn);
+    let first = store
+        .add(&draft("Retry 5 times"), Actor::Claude, &at(MONDAY))
+        .unwrap();
+    let second = store
+        .add(&draft("Retry budget"), Actor::Claude, &at(MONDAY))
+        .unwrap();
+    let third = store
+        .add(&draft("Backoff"), Actor::Claude, &at(MONDAY))
+        .unwrap();
+
+    assert!(
+        store
+            .link(second.id, first.id, Actor::Claude, &at(TUESDAY))
+            .unwrap()
+    );
+    assert!(
+        store
+            .link(second.id, third.id, Actor::Claude, &at(TUESDAY))
+            .unwrap()
+    );
+
+    assert_eq!(store.get(first.id).unwrap().unwrap().related, [second.id]);
+    assert_eq!(
+        store.get(second.id).unwrap().unwrap().related,
+        [first.id, third.id]
+    );
+    assert_eq!(store.get(third.id).unwrap().unwrap().related, [second.id]);
+
+    // Linking twice, in any direction, changes nothing and is not logged.
+    assert!(
+        !store
+            .link(first.id, second.id, Actor::Claude, &at(TUESDAY))
+            .unwrap()
+    );
+    assert_eq!(
+        actions(&conn, second.id),
+        [Action::Add, Action::Link, Action::Link]
+    );
+    assert_eq!(actions(&conn, first.id), [Action::Add]);
+
+    let itself = store
+        .link(first.id, first.id, Actor::Claude, &at(TUESDAY))
+        .unwrap_err();
+    assert_eq!(itself.to_string(), "a note can never be linked to itself");
+    let missing = store
+        .link(first.id, 99, Actor::Claude, &at(TUESDAY))
+        .unwrap_err();
+    assert_eq!(missing.to_string(), "note #99 not found");
+}
+
+#[test]
+fn note_that_replaced_another_cannot_be_deleted() {
+    let conn = db::open_in_memory().unwrap();
+    let store = NoteStore::new(&conn);
+    let old = store
+        .add(&draft("Retry 3 times"), Actor::Claude, &at(MONDAY))
+        .unwrap();
+    let new = store
+        .replace(old.id, &draft("Retry 5 times"), Actor::Claude, &at(TUESDAY))
+        .unwrap();
+
+    let error = store.delete(new.id, Actor::User, &at(TUESDAY)).unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "note #{} replaced #{}: undo the replace, or replace #{}",
+            new.id, old.id, new.id
+        )
+    );
+    assert!(store.get(new.id).unwrap().is_some());
+    // The outdated note itself can be deleted: it was replaced, nothing points to it as true.
+    store.delete(old.id, Actor::User, &at(TUESDAY)).unwrap();
+    assert_eq!(
+        store.get(new.id).unwrap().unwrap().replaces,
+        Vec::<i64>::new()
+    );
+}
+
+#[test]
+fn deleted_note_is_restored_with_its_links() {
+    let conn = db::open_in_memory().unwrap();
+    let store = NoteStore::new(&conn);
+    let old = store
+        .add(&draft("Retry 3 times"), Actor::Claude, &at(MONDAY))
+        .unwrap();
+    let new = store
+        .replace(old.id, &draft("Retry 5 times"), Actor::Claude, &at(TUESDAY))
+        .unwrap();
+    let other = store
+        .add(&draft("Retry budget"), Actor::Claude, &at(MONDAY))
+        .unwrap();
+    store
+        .link(old.id, other.id, Actor::Claude, &at(TUESDAY))
+        .unwrap();
+    let old_before = store.get(old.id).unwrap().unwrap();
+    store.delete(old.id, Actor::User, &at(TUESDAY)).unwrap();
+    let deletion = change_log::changes_of_note(&conn, old.id)
+        .unwrap()
+        .pop()
+        .unwrap();
+
+    let restored = store
+        .restore(deletion.id, Actor::User, &at(TUESDAY))
+        .unwrap();
+
+    assert_eq!(restored, old_before);
+    assert_eq!(store.get(old.id).unwrap(), Some(old_before));
+    assert_eq!(store.get(new.id).unwrap().unwrap().replaces, [old.id]);
+    assert_eq!(store.get(other.id).unwrap().unwrap().related, [old.id]);
+}
+
+#[test]
+fn links_to_a_deleted_note_disappear() {
+    let conn = db::open_in_memory().unwrap();
+    let store = NoteStore::new(&conn);
+    let first = store
+        .add(&draft("Retry 5 times"), Actor::Claude, &at(MONDAY))
+        .unwrap();
+    let second = store
+        .add(&draft("Retry budget"), Actor::Claude, &at(MONDAY))
+        .unwrap();
+    store
+        .link(first.id, second.id, Actor::Claude, &at(TUESDAY))
+        .unwrap();
+
+    store.delete(second.id, Actor::User, &at(TUESDAY)).unwrap();
+
+    assert!(store.get(first.id).unwrap().unwrap().related.is_empty());
+    // Restoring a note whose linked note is gone drops that link.
+    let linked = store.get(first.id).unwrap().unwrap();
+    store.delete(first.id, Actor::User, &at(TUESDAY)).unwrap();
+    let deletion = change_log::changes_of_note(&conn, first.id)
+        .unwrap()
+        .pop()
+        .unwrap();
+    let restored = store
+        .restore(deletion.id, Actor::User, &at(TUESDAY))
+        .unwrap();
+    assert_eq!(restored, linked);
+}

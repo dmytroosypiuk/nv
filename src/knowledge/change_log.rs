@@ -19,6 +19,8 @@ word_enum!(
         Done => "done",
         Drop => "drop",
         Postpone => "postpone",
+        Replace => "replace",
+        Link => "link",
         PersonAdd => "person-add",
         PersonEdit => "person-edit",
         Alias => "alias",
