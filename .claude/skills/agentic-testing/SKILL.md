@@ -51,13 +51,12 @@ python3 .claude/skills/agentic-testing/scripts/pty_run.py <name> "<message 1>" "
 
 ## What to test
 
-The four situations are in `docs/skill-test.md` (send each as its own message). Add:
+The MVP is English only: do not test other languages. The four situations are in
+`docs/skill-test.md` (send each as its own message). Add:
 
 | Case | Message |
 | --- | --- |
 | Passing remark | "What does a 429 status code mean? Also, we agreed today that billing-api will retry at most 5 times." |
-| Ukrainian | "Ми щойно закінчили планування спринту. Вирішили збільшити кількість повторів для billing-api до 5 через таймаути в PAY-1234. Аня перегляне PR до п'ятниці." |
-| Polish | "Właśnie skończyło się planowanie sprintu. Zdecydowaliśmy, że liczba ponowień dla billing-api rośnie do 5 z powodu timeoutów w PAY-1234. Ania sprawdzi PR do piątku." |
 | Recall | Start a second session on the same store: "How many times do we retry billing calls?", "What did I promise for tomorrow?" |
 
 ## What to check
@@ -73,7 +72,7 @@ Check:
    weekday in the `Saved #…, planned Thu 2026-10-08` answer is the weekday the user said.
 4. **Only valid words:** types and areas, source and expiry on an email, no invented fact
    (a number, a role, a cause the user did not say). No secret in any note or log.
-5. **English notes,** also for the Ukrainian and Polish messages.
+5. **Notes in English,** with real dates and the weekday nv printed.
 
 ## Known facts
 

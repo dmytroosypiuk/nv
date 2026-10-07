@@ -4,6 +4,9 @@ description: Search the user's notes with the nv command before you answer. Use 
 allowed-tools: Bash(nv *)
 ---
 
+**Do not `cd` into the base directory above.** It only says where the linked files are.
+Run `nv` from where you are. Do not add `2>/dev/null`.
+
 # nv-recall: search the user's notes before you answer
 
 nv is the user's local notes store: decisions, commitments, how-tos, facts and ideas from

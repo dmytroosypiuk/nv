@@ -89,18 +89,22 @@ are in `docs/design.md`, "Decided while splitting the skill (step 7b)".
 
 ### Open issues
 
-- **The fixes after run 4 are not tested** with Haiku yet.
-- **Loading on a passing remark is not shown.** In every run the skill loaded on the
-  first, sprint-planning message. A decision said in the middle of a coding task, in a
-  fresh session, was never tried. Recall was tried with Opus only.
-- **Ukrainian and Polish input was not tried.** The descriptions and the CLAUDE.md lines
-  are in English.
+- **Loading on a passing remark is flaky:** it saved in 2 of 2 sessions (first run), 0 of 1
+  (second run, Haiku loaded `nv-recall`, found nothing and asked for a yes) and 2 of 2
+  (third run). The idea "decision said in the middle of a coding task" with a real file
+  edit was never tried. Recall was tried with Opus only.
+- **Out of MVP scope: other languages.** The user writes English to Claude in the MVP.
+  Ukrainian and Polish were tried once (second automated run) and are not tested any more.
 - **Haiku adds small things the user did not say** ("Need to standardize on UTC", a
   source reference "token.rs investigation") in spite of the rule.
-- **Haiku hides errors** with `2>/dev/null` on searches in spite of the rule.
+- **Haiku hides errors** with `2>/dev/null` or `2>&1 || true` on a search now and then.
 - **Haiku leaves out fields the user gave**: `--repo billing-api` in every run.
-- **A wrong weekday in a body is not caught.** The weekday check and the `nv date` helper
-  are under "Later, not MVP" in `docs/design.md`.
+- **`--source-kind` without `--source-ref` is an error** (exit 2) and Haiku then drops the
+  source: the HR note in one third-run session lost its `email` source. Open: a clearer
+  message, or let the kind stand alone.
+- **The weekday check has not been seen firing in a real session yet** (only in tests).
+- **The area of the exam promise changed between sessions** (`learning` in two, `work` in
+  one): "exam" is ambiguous.
 - **A password without a digit**, or said in other words, still passes the secret check.
 - **`nv note edit` and `nv note replace` cannot clear a field**; there is no unlink.
 - **The company-data rule in `nv-capture` is temporary**: Dmytro removes it when the
@@ -155,3 +159,49 @@ Seven fresh sessions, each with its own scratch store.
   MVP" in `docs/design.md`).
 - **Still not followed by Haiku:** save a promise without a date and then ask; no
   invented source; correct a date in the body too; no `cd`, no `2>/dev/null`; `--repo`.
+
+### Second automated run (2026-10-07, after `nv date` and the weekday check)
+
+Six sessions: four messages ×3, passing remark, Ukrainian, Polish. Raw output of the first
+run is not kept; this one is summarised here.
+
+| Case | Result |
+| --- | --- |
+| Four messages ×3 | **Message 1 stalled in all three** at the same prompt: Haiku ran `cd /home/mtct/.claude/skills/nv-capture && nv …`. The skill loader puts "Base directory for this skill: …" at the top of the skill text, and Haiku goes there, in spite of "no `cd`" in the text. In default mode this asks to read the folder; the driver denies prompts. (Auto mode approves it.) `nv date` was called first in two of them. |
+| Exam promise (message 2), ×3 | **Not saved in any of the three** (and in neither of the two runs before): Haiku says "I'll save that" and asks which exam and which day. "Never wait with the save" in the Commitments section is not followed. |
+| HR email (message 3), ×3 | Right in the two sessions that ran it (area, source `email`, expiry); one had to retry because `--source-kind` came without `--source-ref`. |
+| Root cause (message 4), ×3 | Password left out in all. Saved in one session (no repo, no ticket, nothing invented); in the other two Haiku asked for a repo and a ticket first and saved nothing. |
+| Passing remark | **Not saved.** Haiku loaded `nv-recall`, searched, found nothing, then offered to save with a command that does not exist (`nv capture decision …`) and waited for a yes. In the first run both passing-remark sessions saved. |
+| Ukrainian | **Right:** English notes, decision plus Anna's commitment with owner, `planned 2026-10-09` first time (`nv date` first). Small: "Anya", a vague "from the current value". |
+| Polish | Nothing saved: after `nv date` Haiku claimed "you said Friday but 2026-10-10 is Saturday" (wrong: the list shows Friday 2026-10-09) and asked for Ania's full name before saving anything. |
+
+- **The date problem is mostly solved** where a session got through: nv date is used, and
+  the Ukrainian session wrote Friday correctly. The weekday check was not hit.
+- **The new main problem is asking instead of saving:** exam promise ×3, Polish (full
+  name), passing remark (asked a yes), root cause ×2 (repo and ticket). The skill says
+  "ask about missing facts, never about whether to save", but Haiku asks first and the user
+  often does not answer. A change to "save first, ask after" is open.
+- **The `cd` into the skill folder** is caused by the loader text and cannot be removed
+  from the skill; a stronger "never cd" at the very top is open.
+
+### Third automated run (2026-10-07, English only, save first and no `cd`)
+
+Five sessions, all English: four messages ×3, passing remark ×2. The settings had
+`Skill(nv-capture)`, `Skill(nv-recall)` and `Read(~/.claude/skills/**)` allowed.
+
+- **No stall, no denied prompt, no `cd`** in any session (0 of 5, before: 3 of 3).
+- **All four messages ran in all three sessions;** 6 notes each.
+- **`nv date` used first** in every four-message session, and every date was right:
+  "Friday" 2026-10-09, "tomorrow" 2026-10-08, the HR deadline `expires Sat 2026-11-14`.
+- **Save first, ask after worked:** the exam promise was saved right away in 3 of 3
+  (it was lost in 9 of 9 sessions before) and then Haiku asked which day. The
+  notes stay without a date until the user answers; that is the intended trade.
+- **Anna** added by name only, no role, in 3 of 3. Her review is a commitment with
+  `--owner`; `nv today` shows it under "Others owe you".
+- **Passing remark:** both saved the decision with `nv-capture` after answering the
+  question (one with source "meeting", one without, none invented).
+- **The password** was left out in 3 of 3.
+- **Still wrong, small:** no `--repo billing-api` anywhere; `--source-kind` without a
+  reference once (source lost); exam area `work` in one session; "next week" stays
+  in the body of the exam note because the day is not known yet; parallel `nv add` calls
+  in one batch are cancelled when the first one fails and have to be repeated.

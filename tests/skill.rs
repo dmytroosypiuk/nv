@@ -209,7 +209,7 @@ fn skill_files_linked_from_skill_md_exist() {
         // Each skill stands alone: no link into the other one.
         assert!(!text.contains("](../"), "{skill} links across skills");
         assert!(
-            text.lines().count() <= 120,
+            text.lines().count() <= 125,
             "{skill}/SKILL.md is short; long parts go to the linked files"
         );
     }
@@ -236,6 +236,7 @@ fn skills_tell_the_rules_that_nv_cannot_check() {
         "--limit 50",
         "nv ranks, it does not judge",
         "run `nv date`",
+        "do not `cd`",
     ] {
         assert!(recall.contains(rule), "nv-recall does not mention: {rule}");
     }
@@ -288,6 +289,8 @@ fn capture_skill_md_alone_is_enough_for_a_correct_note() {
         "do not invent a source",
         "not `replace`",
         "never wait with the save",
+        "save first, ask after",
+        "do not `cd`",
     ] {
         assert!(lower.contains(rule), "SKILL.md does not say: {rule}");
     }

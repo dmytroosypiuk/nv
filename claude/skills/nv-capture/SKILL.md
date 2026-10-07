@@ -4,6 +4,9 @@ description: Save a note with the nv command. Do not ask for approval. Use when 
 allowed-tools: Bash(nv *)
 ---
 
+**Do not `cd` into the base directory above.** It only says where the linked files are.
+Run `nv` from where you are. Do not add `2>/dev/null`.
+
 # nv-capture: save what is worth keeping
 
 nv is the user's local notes store. You write the notes. What you do not save is lost.
@@ -15,9 +18,11 @@ nv is the user's local notes store. You write the notes. What you do not save is
    the PR by Friday"), not a line inside another note.
 2. **Search first**: `nv search` on the same topic. If a note is already there, edit or
    replace it instead of making a duplicate.
-3. **Save right away.** Ask about missing facts, never about whether to save. If the note
-   needs a detail you do not have (which Anna, which repo), ask that one question; a note
-   with a guess in it is worse. A promise with no clear day: see Commitments.
+3. **Save first, ask after.** Save the note with the facts you have. Leave out a field you
+   do not know: no guess. Then ask for what is missing (which exam, which day, which
+   repo) and fix the note with `nv note edit`. Ask about missing facts only after the save,
+   never about whether to save. One exception: two people match and you cannot tell
+   which one. Ask first, because a commitment without its `--owner` would be the user's.
 4. **Confirm in one line**, with the weekday for any date: "Saved to nv: #43 Send retry
    numbers to Anna, planned for Fri 2026-10-09". Copy the weekday from the answer of nv
    (`Saved #43, planned Fri 2026-10-09`). A weekday the user did not say means a wrong
@@ -29,8 +34,7 @@ Not routine steps, what git or the docs show, or personal remarks: [saving-rules
 ## How to save
 
 Fields are flags. The body comes from stdin; always use a quoted heredoc (`<<'EOF'`), so
-code, quotes and `$` arrive unchanged. Run nv commands as they are: no `cd`, no
-`2>/dev/null`.
+code, quotes and `$` arrive unchanged.
 
 ```
 nv date
@@ -78,7 +82,8 @@ secret: write the note without it.
 
 People are addressed by ID: a name is not unique. Before `--person` or `--owner`, run
 `nv people search "anna"`. One match that fits: use that ID. Several, and the context
-does not decide: ask. No match: `nv people add "<name the user said>"`, name only.
+does not decide: ask. No match: `nv people add "<name the user said>"`, name only;
+do not ask for a surname or a role.
 
 ## Commitments
 
