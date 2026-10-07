@@ -125,6 +125,14 @@ The spike confirmed the model and fixed how nv runs, stores and ranks (2026-10-0
 - **People that no longer exist** (merged away) are left out of a note that undo brings back, with a warning on stderr. A missing owner makes the undo fail instead.
 - **Undo starts the embedder** when note text changed or came back.
 
+**Decided while writing the Claude Code skill (step 7)**
+
+- **No SessionStart hook.** `nv today` runs when the user asks what is planned or what others owe them, or when the user runs it. Nothing runs it automatically.
+- **The skill** is `claude/skills/nv/SKILL.md`: when to save, how to write a note, dates, secrets, people, commitments, edit or replace, when to search, undo. `tests/skill.rs` checks that every command and flag in it exists in the CLI.
+- **Permission:** `Bash(nv:*)` in `~/.claude/settings.json`; the snippet is `claude/settings.snippet.json`.
+- **Install:** `./install.sh` (per user, no root, `--dry-run`): binary to `~/.local/bin`, model to `~/.nv/models`, skill to `~/.claude/skills/nv`, permission merged into the settings. It refuses when another `nv` is on the PATH.
+- **Hand test:** `docs/skill-test.md`.
+
 **Build**
 
 - **Pin exact versions** in `Cargo.lock`: `ort` is still a release candidate.
@@ -149,7 +157,7 @@ Claude decides what to save and saves it right away; old information is handled 
 | Undo | Every change is logged and can be undone |
 | Commitments | A note type, separate from the ADO board. Owner: me or a person. Status: todo, done, dropped. Optional planned date |
 | Done commitments | Stay searchable, shown with their status |
-| Today view | Planned for today + what others owe you. Shown at session start (SessionStart hook), on request, or with `nv today` |
+| Today view | Planned for today (overdue included) + what others owe you. Shown on request or with `nv today`. No session start hook (decided in step 7) |
 | Areas | Exactly one per note: `work`, `learning`, `personal`, in one nv |
 | Note types | Zero or one per note: decision, commitment, how-to, fact, idea |
 | Many-to-many | One note can have many repos, tickets and people. No tags |
@@ -198,7 +206,7 @@ Test used to sort them: after this event, is something different in the database
 | Commitment Fulfilled | Commitments | Claude or user |
 | Commitment Dropped | Commitments | Claude or user |
 | Commitment Postponed | Commitments | Claude or user |
-| Today's Commitments Shown | Commitments | Session start hook, Claude or user |
+| Today's Commitments Shown | Commitments | Claude or user, on request |
 | Note Embedded | Search | nv, automatically |
 | Model Changed | Search | User changes a setting |
 | Notes Reindexed | Search | nv, after Model Changed |
@@ -233,7 +241,7 @@ Two actors give commands, nv does the work, and two policies run without anyone 
 
 - When a note is saved or edited, make its embedding.
 - When the model is changed, reindex all notes.
-- When a Claude Code session starts, run `nv today` and show the result.
+- ~~When a Claude Code session starts, run `nv today` and show the result.~~ Dropped in step 7: the today view is shown on request only.
 
 ## Bounded contexts and context map
 
@@ -535,8 +543,10 @@ Design and the embedding spike are done; next is the CLI, then the Claude Code s
 - [x] CLI commands: names, input, output, search filters (session 2)
 - [x] Note template: required and optional fields, writing rules (session 2)
 - [x] Spike: bge-small-en-v1.5 in Rust with fastembed-rs, offline, on 25 real notes (`spikes/embedding/REPORT.md`)
-- [ ] Build the CLI (done: skeleton and schema, notes and change log, embeddings and hybrid search, commitments, people, links, replace, history and undo)
-- [ ] Write the Claude Code skill: when to save, when to search, saving rules, template
+- [x] Build the CLI: skeleton and schema, notes and change log, embeddings and hybrid search, commitments, people, links, replace, history and undo
+- [x] Write the Claude Code skill: when to save, when to search, saving rules, template (`claude/skills/nv/SKILL.md`)
+- [ ] Install it (`./install.sh`) and run the hand test in a real session (`docs/skill-test.md`)
+- [ ] Build and test on the work laptop's OS; check `nv` is a free command name there
 - [ ] Check company rules for using Claude Code with project data
 
 **Later, not MVP**
