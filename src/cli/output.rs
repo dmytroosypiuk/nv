@@ -5,6 +5,7 @@ use std::io::Write;
 use anyhow::Result;
 use serde::Serialize;
 
+use crate::commitments::today::TodayView;
 use crate::knowledge::note::{Note, NoteStatus};
 
 pub fn json(out: &mut dyn Write, value: &impl Serialize) -> Result<()> {
@@ -23,13 +24,19 @@ pub fn change(out: &mut dyn Write, what_happened: &str, note: &Note, as_json: bo
     }
 }
 
-pub fn full_note(out: &mut dyn Write, note: &Note) -> Result<()> {
-    write!(out, "{}", summary(note))?;
-    writeln!(out, "\n{}", note.body)?;
+/// A note plus the names the text output shows instead of IDs.
+pub struct ShownNote {
+    pub note: Note,
+    pub owner_name: Option<String>,
+}
+
+pub fn full_note(out: &mut dyn Write, shown: &ShownNote) -> Result<()> {
+    write!(out, "{}", summary(shown))?;
+    writeln!(out, "\n{}", shown.note.body)?;
     Ok(())
 }
 
-pub fn found_notes(out: &mut dyn Write, notes: &[Note]) -> Result<()> {
+pub fn found_notes(out: &mut dyn Write, notes: &[ShownNote]) -> Result<()> {
     if notes.is_empty() {
         writeln!(out, "No notes found.")?;
     }
@@ -38,7 +45,7 @@ pub fn found_notes(out: &mut dyn Write, notes: &[Note]) -> Result<()> {
     Ok(())
 }
 
-pub fn found_notes_json(out: &mut dyn Write, notes: &[Note]) -> Result<()> {
+pub fn found_notes_json(out: &mut dyn Write, notes: &[ShownNote]) -> Result<()> {
     #[derive(Serialize)]
     struct Found<'a> {
         rank: usize,
@@ -48,12 +55,60 @@ pub fn found_notes_json(out: &mut dyn Write, notes: &[Note]) -> Result<()> {
     let found: Vec<Found> = notes
         .iter()
         .enumerate()
-        .map(|(index, note)| Found {
+        .map(|(index, shown)| Found {
             rank: index + 1,
-            note,
+            note: &shown.note,
         })
         .collect();
     json(out, &found)
+}
+
+/// Two lists: what I planned for today (overdue included), and what others owe me.
+pub fn today(out: &mut dyn Write, view: &TodayView) -> Result<()> {
+    if view.is_empty() {
+        writeln!(out, "Nothing planned for today.")?;
+        return Ok(());
+    }
+    let ids = view
+        .mine
+        .iter()
+        .chain(view.owed.iter().map(|owed| &owed.note));
+    let id_width = ids.map(|note| note.id.to_string().len()).max().unwrap_or(1);
+    let line = |note: &Note, text: String| {
+        let planned = match note.planned_for {
+            Some(planned) if planned < view.today => format!(" · planned {planned}, overdue"),
+            Some(planned) if planned > view.today => format!(" · planned {planned}"),
+            _ => String::new(),
+        };
+        format!("#{:<id_width$}  {text}{planned}\n", note.id)
+    };
+
+    let mut sections = Vec::new();
+    if !view.mine.is_empty() {
+        let mut section = format!("Planned for today ({})\n", view.today);
+        for note in &view.mine {
+            section.push_str(&line(note, note.title.clone()));
+        }
+        sections.push(section);
+    }
+    if !view.owed.is_empty() {
+        let mut section = String::from("Others owe you\n");
+        for owed in &view.owed {
+            section.push_str(&line(
+                &owed.note,
+                format!("{}: {}", owed.owner_name, owed.note.title),
+            ));
+        }
+        sections.push(section);
+    }
+    if view.undated > 0 {
+        sections.push(format!(
+            "{} more of yours have no date: nv search --type commitment\n",
+            view.undated
+        ));
+    }
+    write!(out, "{}", sections.join("\n"))?;
+    Ok(())
 }
 
 #[derive(Debug, Serialize)]
@@ -84,7 +139,8 @@ pub fn embedded(out: &mut dyn Write, notes: usize) -> Result<()> {
 }
 
 /// Two or three lines: ID, type, area, date and status; the title; then the details.
-fn summary(note: &Note) -> String {
+fn summary(shown: &ShownNote) -> String {
+    let note = &shown.note;
     let id = format!("#{}  ", note.id);
     let indent = " ".repeat(id.len());
     let note_type = note
@@ -97,7 +153,7 @@ fn summary(note: &Note) -> String {
         status_word(note),
         note.title
     );
-    let details = details(note);
+    let details = details(shown);
     if !details.is_empty() {
         text.push_str(&format!("{indent}{}\n", details.join(" · ")));
     }
@@ -112,8 +168,15 @@ fn status_word(note: &Note) -> &'static str {
     }
 }
 
-fn details(note: &Note) -> Vec<String> {
+fn details(shown: &ShownNote) -> Vec<String> {
+    let note = &shown.note;
     let mut details = Vec::new();
+    if let Some(owner_name) = &shown.owner_name {
+        details.push(format!("owner: {owner_name}"));
+    }
+    if let Some(planned_for) = note.planned_for {
+        details.push(format!("planned: {planned_for}"));
+    }
     if let Some(project) = &note.project {
         details.push(format!("project: {project}"));
     }

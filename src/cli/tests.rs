@@ -268,3 +268,38 @@ fn only_one_embed_pending_runs_at_a_time() {
     let answer = nv.run(&["model", "embed-pending"], "");
     assert_eq!(answer.out, "Embedded 1 notes\n");
 }
+
+#[test]
+fn today_does_not_load_model() {
+    let mut nv = Nv::new();
+    nv.add(
+        "Send retry numbers",
+        "Promised.",
+        &["--type", "commitment", "--planned-for", "2026-10-07"],
+    );
+
+    let today = nv.run(&["today"], "");
+
+    assert_eq!(
+        today.out,
+        "Planned for today (2026-10-07)\n#1  Send retry numbers\n"
+    );
+    assert_eq!(nv.loader.loads, 0);
+}
+
+#[test]
+fn commitment_commands_do_not_start_background_embedding() {
+    let mut nv = Nv::new();
+    nv.add("Send retry numbers", "Promised.", &["--type", "commitment"]);
+    nv.add("Book the exam slot", "Promised.", &["--type", "commitment"]);
+    let started = nv.background.started;
+
+    // The text of the note does not change, so there is nothing to embed.
+    nv.run(&["commitment", "postpone", "1", "2026-10-09"], "");
+    nv.run(&["commitment", "done", "1"], "");
+    nv.run(&["commitment", "drop", "2"], "");
+    nv.run(&["today"], "");
+
+    assert_eq!(nv.background.started, started);
+    assert_eq!(nv.loader.loads, 0);
+}

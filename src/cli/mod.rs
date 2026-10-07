@@ -12,12 +12,15 @@ use anyhow::{Result, anyhow, bail};
 use clap::{Args, Parser, Subcommand};
 
 use crate::clock::{Date, Now};
+use crate::commitments::today::today_view;
+use crate::commitments::{mark_done, mark_dropped, postpone};
 use crate::config::NvHome;
 use crate::db;
-use crate::knowledge::change_log::Actor;
+use crate::knowledge::change_log::{Action, Actor};
 use crate::knowledge::note::{
-    Area, NoteChanges, NoteDraft, NoteFields, NoteType, Source, SourceKind,
+    Area, Note, NoteChanges, NoteDraft, NoteFields, NoteType, Source, SourceKind,
 };
+use crate::knowledge::people::person_name;
 use crate::knowledge::store::NoteStore;
 use crate::search::embedder::ModelLoader;
 use crate::search::filter::NoteFilter;
@@ -41,9 +44,32 @@ enum Command {
     Add(AddArgs),
     /// Shortcut for `nv note search`
     Search(SearchArgs),
+    /// Promises: done, drop, postpone and the today view
+    #[command(subcommand)]
+    Commitment(CommitmentCommand),
+    /// Shortcut for `nv commitment today`
+    Today(TodayArgs),
     /// The embedding model and its index
     #[command(subcommand)]
     Model(ModelCommand),
+}
+
+#[derive(Debug, Subcommand)]
+enum CommitmentCommand {
+    /// What you planned for today, and what others owe you
+    Today(TodayArgs),
+    /// The promise was kept
+    Done { id: i64 },
+    /// The promise will not be kept
+    Drop { id: i64 },
+    /// Move the planned date, like 2026-10-09
+    Postpone { id: i64, date: Date },
+}
+
+#[derive(Debug, Args)]
+struct TodayArgs {
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -105,6 +131,12 @@ struct AddArgs {
     /// For time-limited facts: the last day the note is true, like 2026-10-12
     #[arg(long)]
     expires_on: Option<Date>,
+    /// Commitments: ID of the person who promised. Leave out when it is you
+    #[arg(long)]
+    owner: Option<i64>,
+    /// Commitments: the day it is planned for, like 2026-10-08
+    #[arg(long)]
+    planned_for: Option<Date>,
     #[arg(long)]
     json: bool,
 }
@@ -142,6 +174,9 @@ struct EditArgs {
     source_ref: Option<String>,
     #[arg(long)]
     expires_on: Option<Date>,
+    /// Commitments: ID of the person who promised
+    #[arg(long)]
+    owner: Option<i64>,
     #[arg(long)]
     json: bool,
 }
@@ -225,8 +260,8 @@ pub fn run(cli: Cli, context: &mut Context<'_>, streams: Streams<'_>) -> Result<
                 tickets: args.tickets,
                 source: Source::from_parts(args.source_kind, args.source_ref)?,
                 expires_on: args.expires_on,
-                owner: None,
-                planned_for: None,
+                owner: args.owner,
+                planned_for: args.planned_for,
             })?;
             let note = store.add(&draft, actor, &now)?;
             embed_in_background(context);
@@ -239,7 +274,7 @@ pub fn run(cli: Cli, context: &mut Context<'_>, streams: Streams<'_>) -> Result<
             if args.json {
                 output::json(out, &note)
             } else {
-                output::full_note(out, &note)
+                output::full_note(out, &shown(&conn, note)?)
             }
         }
         Command::Note(NoteCommand::Edit(args)) => {
@@ -253,7 +288,7 @@ pub fn run(cli: Cli, context: &mut Context<'_>, streams: Streams<'_>) -> Result<
                 tickets: args.tickets,
                 source: Source::from_parts(args.source_kind, args.source_ref)?,
                 expires_on: args.expires_on,
-                owner: None,
+                owner: args.owner,
             };
             let note = store.edit(args.id, &changes, actor, &now)?;
             embed_in_background(context);
@@ -288,13 +323,44 @@ pub fn run(cli: Cli, context: &mut Context<'_>, streams: Streams<'_>) -> Result<
             }
             let mut found = Vec::new();
             for id in outcome.note_ids {
-                found.extend(store.get(id)?);
+                if let Some(note) = store.get(id)? {
+                    found.push(shown(&conn, note)?);
+                }
             }
             if args.json {
                 output::found_notes_json(out, &found)
             } else {
                 output::found_notes(out, &found)
             }
+        }
+        Command::Today(args) | Command::Commitment(CommitmentCommand::Today(args)) => {
+            let view = today_view(&conn, now.today())?;
+            if args.json {
+                output::json(out, &view)
+            } else {
+                output::today(out, &view)
+            }
+        }
+        Command::Commitment(CommitmentCommand::Done { id }) => {
+            store.change(id, Action::Done, actor, &now, |note| {
+                Ok(mark_done(note, &now)?)
+            })?;
+            writeln!(out, "Done #{id}")?;
+            Ok(())
+        }
+        Command::Commitment(CommitmentCommand::Drop { id }) => {
+            store.change(id, Action::Drop, actor, &now, |note| {
+                Ok(mark_dropped(note, &now)?)
+            })?;
+            writeln!(out, "Dropped #{id}")?;
+            Ok(())
+        }
+        Command::Commitment(CommitmentCommand::Postpone { id, date }) => {
+            store.change(id, Action::Postpone, actor, &now, |note| {
+                Ok(postpone(note, date)?)
+            })?;
+            writeln!(out, "Postponed #{id} to {date}")?;
+            Ok(())
         }
         Command::Model(ModelCommand::Info(args)) => {
             let model = context.loader.model();
@@ -344,6 +410,15 @@ pub fn run(cli: Cli, context: &mut Context<'_>, streams: Streams<'_>) -> Result<
             output::embedded(out, embedded)
         }
     }
+}
+
+/// A note with what the text output needs besides the note itself.
+fn shown(conn: &rusqlite::Connection, note: Note) -> Result<output::ShownNote> {
+    let owner_name = match note.owner {
+        Some(owner) => person_name(conn, owner)?,
+        None => None,
+    };
+    Ok(output::ShownNote { note, owner_name })
 }
 
 /// Starts embedding the saved note without waiting. If this fails, the note is still

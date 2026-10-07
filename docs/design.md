@@ -85,6 +85,19 @@ The spike confirmed the model and fixed how nv runs, stores and ranks (2026-10-0
 - **Model test:** the pinned cosine (0.9094 for two fixed texts) fails with mean pooling (0.9016). The pinned ranking on the spike notes does not notice wrong pooling, so both tests are needed.
 - **Not built yet:** the `--person` filter comes with people; `--planned` works, but a planned date can only be set once commitments are built.
 
+**Decided while building commitments (step 4)**
+
+- **"Planned for today" includes overdue:** my `todo` commitments planned for today or earlier, oldest plan first, overdue ones marked.
+- **My commitments without a planned date** are not listed, only counted in one line, so they are not forgotten and do not flood the view.
+- **"Others owe you"** is every `todo` commitment with an owner, soonest first, undated last.
+- **Not in the today view:** done, dropped, outdated and expired commitments.
+- **Owner and planned date** are given on `nv add` with `--owner <person-id>` and `--planned-for <date>`, only for `--type commitment` (a rule in Rust; the SQL CHECK is the second lock). An unknown person ID is refused.
+- **The planned date changes only through `nv commitment postpone`**, which also sets a first date. The owner can be changed with `nv note edit --owner`.
+- **A done or dropped commitment keeps its type.** Changing the type and back would reopen it. Its title and body can still be edited.
+- **A note that stops being a commitment** (edit of the type, only while `todo`) loses its owner and planned date.
+- **`closed_at`** is set by `done` and `drop`. The change log gets the actions `done`, `drop` and `postpone`, each with the state before.
+- **Commitment commands do not start the embedder:** the text of the note does not change.
+
 **Build**
 
 - **Pin exact versions** in `Cargo.lock`: `ort` is still a release candidate.
@@ -314,10 +327,10 @@ nv note delete <id>
 nv note link <id> <id>
 nv note search "<query>" [filters]
 
-nv commitment today
-nv commitment done <id>
-nv commitment drop <id>
-nv commitment postpone <id> <date>
+nv commitment today                # two lists, see below
+nv commitment done <id>            # "Done #12"
+nv commitment drop <id>            # "Dropped #12"
+nv commitment postpone <id> <date> # "Postponed #12 to 2026-10-09"; also sets a first date
 
 nv people list
 nv people search "<name>"
@@ -358,8 +371,24 @@ EOF
      Retry 3 times
 ```
 
+Today view (`--json` gives `today`, `mine`, `owed` with `owner_name`, and `undated`):
+
+```
+Planned for today (2026-10-07)
+#2  Book the exam slot · planned 2026-10-05, overdue
+#1  Send retry numbers to Anna
+
+Others owe you
+#3  Anna Nowak: Review the retry PR · planned 2026-10-08
+#4  Piotr Zielinski: Send the staging access steps
+
+2 more of yours have no date: nv search --type commitment
+```
+
+Nothing to show: `Nothing planned for today.`
+
 - A note with no type shows `note`. A commitment shows `todo`, `done` or `dropped` in place of `active`.
-- The details line holds project, repos, tickets, people and source, only those that are set.
+- The details line holds owner, planned date, project, repos, tickets, people, source and expiry date, only those that are set. A commitment of mine shows no owner.
 - `nv note show` prints the same lines, then an empty line and the body.
 - `nv add` answers `Saved #42` (`Edited #42`, `Deleted #42`); with `--json`, the whole note.
 - No results: `No notes found.` Search `--json` is a list of notes, each with its `rank`.
@@ -434,7 +463,7 @@ CREATE VIRTUAL TABLE notes_fts USING fts5(title, body, content='notes', content_
 CREATE TABLE change_log (
   id INTEGER PRIMARY KEY, at TEXT NOT NULL,   -- injected, no SQL default
   actor TEXT NOT NULL,            -- 'claude' or 'user'
-  action TEXT NOT NULL,           -- 'add', 'edit', 'delete', 'restore'
+  action TEXT NOT NULL,           -- 'add', 'edit', 'delete', 'restore', 'done', 'drop', 'postpone'
   note_id INTEGER NOT NULL,
   before_json TEXT                -- old state, used by undo
 );
@@ -458,7 +487,7 @@ Design and the embedding spike are done; next is the CLI, then the Claude Code s
 - [x] CLI commands: names, input, output, search filters (session 2)
 - [x] Note template: required and optional fields, writing rules (session 2)
 - [x] Spike: bge-small-en-v1.5 in Rust with fastembed-rs, offline, on 25 real notes (`spikes/embedding/REPORT.md`)
-- [ ] Build the CLI (done: skeleton and schema, notes and change log, embeddings and hybrid search; next: commitments, people, links and history)
+- [ ] Build the CLI (done: skeleton and schema, notes and change log, embeddings and hybrid search, commitments; next: people, links and history)
 - [ ] Write the Claude Code skill: when to save, when to search, saving rules, template
 - [ ] Check company rules for using Claude Code with project data
 

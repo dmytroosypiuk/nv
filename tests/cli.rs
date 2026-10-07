@@ -216,6 +216,9 @@ fn show_json_has_all_fields() {
             "repos": ["billing-api"],
             "tickets": ["PAY-1234"],
             "expires_on": null,
+            "owner_person_id": null,
+            "planned_for": null,
+            "closed_at": null,
             "created_at": MONDAY,
             "updated_at": MONDAY,
         })
@@ -574,4 +577,362 @@ fn embed_pending_is_hidden_from_help() {
             predicate::str::contains("reindex")
                 .and(predicate::str::contains("embed-pending").not()),
         );
+}
+
+// ----- commitments -----
+
+const WEDNESDAY: &str = "2026-10-07T09:00:00+02:00";
+
+/// People commands come in step 5: until then people are created in SQL.
+fn add_people(nv_home: &TempDir) {
+    nv(nv_home).args(["model", "info"]).assert().success();
+    let conn = rusqlite::Connection::open(nv_home.path().join("nv.db")).unwrap();
+    conn.execute_batch(
+        "INSERT INTO people (id, name) VALUES (7, 'Anna Nowak'), (9, 'Piotr Zielinski');",
+    )
+    .unwrap();
+}
+
+fn add_commitment(nv_home: &TempDir, title: &str, flags: &[&str]) {
+    nv(nv_home)
+        .env("NV_NOW", MONDAY)
+        .args([
+            "add",
+            "--title",
+            title,
+            "--area",
+            "work",
+            "--type",
+            "commitment",
+        ])
+        .args(flags)
+        .write_stdin("Promised on the daily.")
+        .assert()
+        .success();
+}
+
+/// #1 mine today, #2 mine overdue, #3 Anna's, #4 Piotr's undated, #5 and #6 mine undated.
+fn add_commitments(nv_home: &TempDir) {
+    add_people(nv_home);
+    add_commitment(
+        nv_home,
+        "Send retry numbers to Anna",
+        &["--planned-for", "2026-10-07"],
+    );
+    add_commitment(
+        nv_home,
+        "Book the exam slot",
+        &["--planned-for", "2026-10-05"],
+    );
+    add_commitment(
+        nv_home,
+        "Review the retry PR",
+        &["--owner", "7", "--planned-for", "2026-10-08"],
+    );
+    add_commitment(nv_home, "Send the staging access steps", &["--owner", "9"]);
+    add_commitment(nv_home, "Read the SQLite book", &[]);
+    add_commitment(nv_home, "Clean the backlog", &[]);
+}
+
+fn nv_on_wednesday(nv_home: &TempDir) -> Command {
+    let mut command = nv(nv_home);
+    command.env("NV_NOW", WEDNESDAY);
+    command
+}
+
+#[test]
+fn today_output_matches_golden_text() {
+    let nv_home = TempDir::new().unwrap();
+    add_commitments(&nv_home);
+
+    nv_on_wednesday(&nv_home)
+        .arg("today")
+        .assert()
+        .success()
+        .stdout(
+            "\
+Planned for today (2026-10-07)
+#2  Book the exam slot · planned 2026-10-05, overdue
+#1  Send retry numbers to Anna
+
+Others owe you
+#3  Anna Nowak: Review the retry PR · planned 2026-10-08
+#4  Piotr Zielinski: Send the staging access steps
+
+2 more of yours have no date: nv search --type commitment
+",
+        );
+}
+
+#[test]
+fn today_shortcut_equals_commitment_today() {
+    let nv_home = TempDir::new().unwrap();
+    add_commitments(&nv_home);
+
+    let long = nv_on_wednesday(&nv_home)
+        .args(["commitment", "today"])
+        .output()
+        .unwrap();
+    let short = nv_on_wednesday(&nv_home).arg("today").output().unwrap();
+
+    assert!(long.status.success());
+    assert_eq!(long.stdout, short.stdout);
+}
+
+#[test]
+fn today_with_nothing_planned_says_so() {
+    let nv_home = TempDir::new().unwrap();
+    add_retry_note(&nv_home);
+
+    nv_on_wednesday(&nv_home)
+        .arg("today")
+        .assert()
+        .success()
+        .stdout("Nothing planned for today.\n")
+        .stderr("");
+}
+
+#[test]
+fn today_json_has_mine_owed_and_undated() {
+    let nv_home = TempDir::new().unwrap();
+    add_commitments(&nv_home);
+
+    let view = stdout_json(nv_on_wednesday(&nv_home).args(["today", "--json"]));
+
+    assert_eq!(view["today"], "2026-10-07");
+    assert_eq!(view["undated"], 2);
+    let mine = view["mine"].as_array().unwrap();
+    assert_eq!(mine.len(), 2);
+    assert_eq!(mine[0]["id"], 2);
+    assert_eq!(mine[0]["planned_for"], "2026-10-05");
+    assert_eq!(mine[0]["commitment_status"], "todo");
+    assert_eq!(mine[0]["owner_person_id"], Value::Null);
+    let owed = view["owed"].as_array().unwrap();
+    assert_eq!(owed[0]["id"], 3);
+    assert_eq!(owed[0]["owner_name"], "Anna Nowak");
+    assert_eq!(owed[0]["owner_person_id"], 7);
+}
+
+#[test]
+fn done_then_postpone_fails() {
+    let nv_home = TempDir::new().unwrap();
+    add_commitments(&nv_home);
+
+    nv_on_wednesday(&nv_home)
+        .args(["commitment", "done", "1"])
+        .assert()
+        .success()
+        .stdout("Done #1\n");
+
+    nv_on_wednesday(&nv_home)
+        .args(["commitment", "postpone", "1", "2026-10-09"])
+        .assert()
+        .code(1)
+        .stdout("")
+        .stderr("nv: commitment #1 is already done\n");
+    nv_on_wednesday(&nv_home)
+        .args(["commitment", "drop", "1"])
+        .assert()
+        .code(1)
+        .stderr("nv: commitment #1 is already done\n");
+
+    let note = stdout_json(nv(&nv_home).args(["note", "show", "1", "--json"]));
+    assert_eq!(note["commitment_status"], "done");
+    assert_eq!(note["closed_at"], WEDNESDAY);
+    assert_eq!(note["planned_for"], "2026-10-07");
+    // Done commitments stay searchable, shown with their status.
+    nv(&nv_home)
+        .args(["search", "--type", "commitment", "--planned", "2026-10-07"])
+        .assert()
+        .stdout(predicate::str::starts_with(
+            "#1  commitment · work · 2026-10-05 · done\n",
+        ));
+}
+
+#[test]
+fn drop_takes_commitment_out_of_today() {
+    let nv_home = TempDir::new().unwrap();
+    add_commitments(&nv_home);
+
+    nv_on_wednesday(&nv_home)
+        .args(["commitment", "drop", "3"])
+        .assert()
+        .success()
+        .stdout("Dropped #3\n");
+
+    nv_on_wednesday(&nv_home)
+        .arg("today")
+        .assert()
+        .stdout(predicate::str::contains("Review the retry PR").not());
+}
+
+#[test]
+fn done_on_a_fact_fails() {
+    let nv_home = TempDir::new().unwrap();
+    add_retry_note(&nv_home);
+
+    nv(&nv_home)
+        .args(["commitment", "done", "1"])
+        .assert()
+        .code(1)
+        .stderr("nv: note #1 is not a commitment\n");
+    nv(&nv_home)
+        .args(["commitment", "done", "99"])
+        .assert()
+        .code(1)
+        .stderr("nv: note #99 not found\n");
+}
+
+#[test]
+fn postpone_moves_commitment_out_of_today() {
+    let nv_home = TempDir::new().unwrap();
+    add_commitments(&nv_home);
+
+    nv_on_wednesday(&nv_home)
+        .args(["commitment", "postpone", "1", "2026-10-09"])
+        .assert()
+        .success()
+        .stdout("Postponed #1 to 2026-10-09\n");
+
+    nv_on_wednesday(&nv_home)
+        .arg("today")
+        .assert()
+        .stdout(predicate::str::contains("Send retry numbers to Anna").not());
+    nv_on_wednesday(&nv_home)
+        .env("NV_NOW", "2026-10-09T08:00:00+02:00")
+        .arg("today")
+        .assert()
+        .stdout(predicate::str::contains("#1  Send retry numbers to Anna\n"));
+    nv(&nv_home)
+        .args(["commitment", "postpone", "1", "next week"])
+        .assert()
+        .code(2);
+}
+
+#[test]
+fn planned_filter_finds_commitment_by_date() {
+    let nv_home = TempDir::new().unwrap();
+    add_commitments(&nv_home);
+
+    // "What did I promise to do tomorrow": the spike's only miss is a filter question.
+    nv_on_wednesday(&nv_home)
+        .args(["search", "--planned", "2026-10-08"])
+        .assert()
+        .success()
+        .stdout(
+            "\
+#3  commitment · work · 2026-10-05 · todo
+    Review the retry PR
+    owner: Anna Nowak · planned: 2026-10-08
+",
+        );
+}
+
+#[test]
+fn planned_for_without_commitment_type_fails() {
+    let nv_home = TempDir::new().unwrap();
+    add_people(&nv_home);
+
+    nv(&nv_home)
+        .args([
+            "add", "--title", "Exam", "--area", "learning", "--type", "fact",
+        ])
+        .args(["--planned-for", "2026-10-08"])
+        .write_stdin("The exam is on Thursday.")
+        .assert()
+        .code(1)
+        .stderr("nv: only a commitment has a planned date: use --type commitment\n");
+    nv(&nv_home)
+        .args([
+            "add", "--title", "Exam", "--area", "learning", "--owner", "7",
+        ])
+        .write_stdin("Body.")
+        .assert()
+        .code(1)
+        .stderr("nv: only a commitment has an owner: use --type commitment\n");
+    nv(&nv_home)
+        .args([
+            "add",
+            "--title",
+            "Exam",
+            "--area",
+            "learning",
+            "--type",
+            "commitment",
+        ])
+        .args(["--owner", "8"])
+        .write_stdin("Body.")
+        .assert()
+        .code(1)
+        .stderr("nv: person #8 not found\n");
+}
+
+#[test]
+fn search_and_show_display_owner_and_planned_date() {
+    let nv_home = TempDir::new().unwrap();
+    add_commitments(&nv_home);
+
+    nv(&nv_home)
+        .args(["note", "show", "3"])
+        .assert()
+        .success()
+        .stdout(
+            "\
+#3  commitment · work · 2026-10-05 · todo
+    Review the retry PR
+    owner: Anna Nowak · planned: 2026-10-08
+
+Promised on the daily.
+",
+        );
+    nv(&nv_home)
+        .args(["note", "edit", "3", "--owner", "9"])
+        .assert()
+        .success();
+    nv(&nv_home)
+        .args(["note", "show", "3"])
+        .assert()
+        .stdout(predicate::str::contains(
+            "owner: Piotr Zielinski · planned: 2026-10-08",
+        ));
+}
+
+#[test]
+fn done_drop_and_postpone_are_in_the_change_log() {
+    let nv_home = TempDir::new().unwrap();
+    add_commitments(&nv_home);
+    nv(&nv_home)
+        .args(["commitment", "postpone", "1", "2026-10-09"])
+        .assert()
+        .success();
+    nv(&nv_home)
+        .args(["commitment", "done", "1"])
+        .assert()
+        .success();
+    nv(&nv_home)
+        .args(["commitment", "drop", "2"])
+        .assert()
+        .success();
+
+    let conn = rusqlite::Connection::open(nv_home.path().join("nv.db")).unwrap();
+    let mut statement = conn
+        .prepare(
+            "SELECT action, note_id, json_extract(before_json, '$.planned_for')
+             FROM change_log WHERE action NOT IN ('add') ORDER BY id",
+        )
+        .unwrap();
+    let log: Vec<(String, i64, Option<String>)> = statement
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+
+    assert_eq!(
+        log,
+        [
+            ("postpone".to_string(), 1, Some("2026-10-07".to_string())),
+            ("done".to_string(), 1, Some("2026-10-09".to_string())),
+            ("drop".to_string(), 2, Some("2026-10-05".to_string())),
+        ]
+    );
 }
