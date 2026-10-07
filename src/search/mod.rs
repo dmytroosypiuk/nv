@@ -1,5 +1,6 @@
 //! Embeddings, model, FTS and ranking. Depends on `knowledge`, never the reverse.
 
+pub mod bge;
 pub mod embedder;
 pub mod filter;
 pub mod fusion;

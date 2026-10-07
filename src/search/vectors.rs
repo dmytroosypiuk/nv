@@ -34,9 +34,10 @@ pub fn from_blob(blob: &[u8]) -> Result<Vec<f32>> {
         "a stored vector has {} bytes, not a multiple of 4",
         blob.len()
     );
-    Ok(blob
-        .chunks_exact(4)
-        .map(|bytes| f32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+    let (chunks, _) = blob.as_chunks::<4>();
+    Ok(chunks
+        .iter()
+        .map(|bytes| f32::from_le_bytes(*bytes))
         .collect())
 }
 
