@@ -1,0 +1,41 @@
+{
+  "notes": [
+    {"id": 1, "type": "decision", "area": "work", "title": "Retry count for billing-api is 5", "body": "Retry count for outgoing billing-api calls is 5 (was 3), agreed with Anna Nowak because of timeouts in PAY-1234."},
+    {"id": 2, "type": "decision", "area": "work", "title": "Retry count for billing-api is 3", "body": "We use 3 retries with exponential backoff for billing-api calls. Agreed in sprint planning."},
+    {"id": 3, "type": "how-to", "area": "work", "title": "Open the ad server admin panel locally", "body": "To open the ad server admin panel locally: start the VPN, run `make adserver-up` in the infra repo, then open http://localhost:8443/admin. Login uses the staging SSO account."},
+    {"id": 4, "type": "fact", "area": "work", "title": "Root cause of auth token bug", "body": "The auth bug in PAY-1180 was caused by tokens expiring 5 minutes early because of clock drift between the gateway and the auth service. Fixed by adding 60s leeway to token validation."},
+    {"id": 5, "type": "fact", "area": "work", "title": "Anna Kowalska on vacation", "body": "Anna Kowalska (QA lead) is on vacation from 2026-10-12 to 2026-10-16. Ask Piotr for QA sign-off during that week."},
+    {"id": 6, "type": "how-to", "area": "work", "title": "Get access to the staging database", "body": "To get read access to the staging Postgres database, ask the DevOps team in the #infra-help Teams channel. Access is granted for 30 days."},
+    {"id": 7, "type": "fact", "area": "learning", "title": "Library reqflow does not support streaming", "body": "The reqflow HTTP library does not support streaming response bodies. Use hyper directly when responses can be large."},
+    {"id": 8, "type": "commitment", "area": "work", "title": "Fix timeout config in billing-api", "body": "I promised Anna Nowak to fix the HTTP client timeout config in billing-api (set connect timeout to 2s, read timeout to 10s). Planned for 2026-10-08."},
+    {"id": 9, "type": "commitment", "area": "work", "title": "Anna sends logs from production incident", "body": "Anna Nowak promised to send me the production logs from the payment incident on 2026-10-05 by tomorrow."},
+    {"id": 10, "type": "fact", "area": "learning", "title": "Rust question mark operator", "body": "In Rust, the `?` operator returns early from the function with the error when a Result is Err, converting it with From::from."},
+    {"id": 11, "type": "fact", "area": "learning", "title": "SQLite WAL mode for concurrent readers", "body": "SQLite needs WAL journal mode (PRAGMA journal_mode=WAL) to let readers work while a writer is active. Found while fixing a lock error in the reporting job."},
+    {"id": 12, "type": "idea", "area": "work", "title": "Refactor the auth module", "body": "We should split the auth module into token validation and session management someday. Nobody owns this yet."},
+    {"id": 13, "type": "decision", "area": "personal", "title": "Use SQLite for nv", "body": "I decided to use SQLite with FTS5 for nv instead of a separate vector database, because the store is small and must work offline."},
+    {"id": 14, "type": "fact", "area": "work", "title": "Assessment date", "body": "My EPAM technical assessment is on 2026-10-20 at 10:00 Warsaw time."},
+    {"id": 15, "type": "commitment", "area": "learning", "title": "Prepare Rust ownership topics for assessment", "body": "I will prepare notes on Rust ownership, borrowing and lifetimes before the assessment on 2026-10-20."},
+    {"id": 16, "type": "fact", "area": "work", "title": "Piotr prefers small pull requests", "body": "Piotr Zielinski prefers pull requests under 300 changed lines and asks to split bigger ones."},
+    {"id": 17, "type": "how-to", "area": "work", "title": "Run integration tests locally", "body": "Integration tests need DOCKER_HOST set to the Colima socket on macOS: export DOCKER_HOST=unix://$HOME/.colima/default/docker.sock, then run `cargo test --features integration`."},
+    {"id": 18, "type": "fact", "area": "work", "title": "Staging is down until Friday", "body": "The staging environment is down for a database migration until Friday 2026-10-09. Use the dev environment for demos."},
+    {"id": 19, "type": "decision", "area": "work", "title": "Feature flags for checkout redesign", "body": "Team decided to ship the checkout redesign behind the feature flag checkout_v2, rolled out to 10% of users first."},
+    {"id": 20, "type": "fact", "area": "personal", "title": "Grandpa birthday gift idea", "body": "Grandpa would like a tablet with large text for video calls. His birthday is in November."},
+    {"id": 21, "type": "how-to", "area": "learning", "title": "Debug flaky tests with a fixed seed", "body": "To debug flaky property tests, fix the random seed with PROPTEST_RNG_SEED and rerun the failing case until it reproduces."},
+    {"id": 22, "type": "fact", "area": "work", "title": "Payments team on-call rotation", "body": "The payments team on-call rotation changes every Monday at 09:00. The schedule is in the PagerDuty service 'payments-core'."},
+    {"id": 23, "type": "commitment", "area": "work", "title": "Fill the vacation request form", "body": "HR asked me by email to fill the vacation request form for December in the HR portal before 2026-10-15."},
+    {"id": 24, "type": "idea", "area": "personal", "title": "nv could support images later", "body": "Maybe nv should store screenshots or diagrams as notes later. Not for the MVP."},
+    {"id": 25, "type": "fact", "area": "learning", "title": "Cosine similarity with normalized vectors", "body": "When embedding vectors are normalized to length 1, cosine similarity is the same as the dot product, so search can skip the division."}
+  ],
+  "queries": [
+    {"query": "how many times do we retry billing calls", "expected": [1, 2]},
+    {"query": "why did login tokens expire too early", "expected": [4]},
+    {"query": "who can approve QA while Anna is away", "expected": [5]},
+    {"query": "how do I connect to the staging postgres", "expected": [6]},
+    {"query": "what did I promise to do tomorrow", "expected": [8]},
+    {"query": "http client that cannot stream large responses", "expected": [7]},
+    {"query": "docker setup needed to run tests on my mac", "expected": [17]},
+    {"query": "when is my exam", "expected": [14]},
+    {"query": "sqlite database locked error", "expected": [11]},
+    {"query": "present gift for my grandfather", "expected": [20]}
+  ]
+}
