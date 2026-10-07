@@ -1,5 +1,6 @@
 use super::*;
 use crate::db;
+use crate::knowledge::note::CommitmentStatus;
 use crate::test_support::{MONDAY, add_at, add_note, work_note};
 
 const TUESDAY: &str = "2026-10-06T10:30:00+02:00";
@@ -238,4 +239,67 @@ fn person_filter_finds_linked_notes_and_owned_commitments() {
     assert!(anna.narrows());
     assert_eq!(ids(&conn, &anna, "2026-10-07"), [owed_by_anna, about_anna]);
     assert_eq!(ids(&conn, &piotr, "2026-10-07"), [about_piotr, about_anna]);
+}
+
+#[test]
+fn status_keeps_commitments_with_that_status() {
+    let conn = db::open_in_memory().unwrap();
+    let mut commitment = work_note("Send the report to Anna", "Promised on the daily.");
+    commitment.note_type = Some(NoteType::Commitment);
+    let open = add_at(&conn, commitment.clone(), MONDAY);
+    let done = add_at(&conn, commitment.clone(), MONDAY);
+    let dropped = add_at(&conn, commitment, MONDAY);
+    for (status, id) in [("done", done), ("dropped", dropped)] {
+        conn.execute(
+            "UPDATE notes SET commitment_status = ?1, closed_at = ?2 WHERE id = ?3",
+            params![status, TUESDAY, id],
+        )
+        .unwrap();
+    }
+
+    let by = |status| {
+        let filter = NoteFilter {
+            status: Some(status),
+            ..NoteFilter::default()
+        };
+        assert!(filter.narrows());
+        ids(&conn, &filter, "2026-10-07")
+    };
+
+    assert_eq!(by(CommitmentStatus::Todo), [open]);
+    assert_eq!(by(CommitmentStatus::Done), [done]);
+    assert_eq!(by(CommitmentStatus::Dropped), [dropped]);
+}
+
+#[test]
+fn status_leaves_out_notes_that_are_not_commitments() {
+    let conn = db::open_in_memory().unwrap();
+    add_note(&conn, "Not a commitment", "Body.");
+
+    let filter = NoteFilter {
+        status: Some(CommitmentStatus::Todo),
+        ..NoteFilter::default()
+    };
+
+    assert_eq!(ids(&conn, &filter, "2026-10-07"), [] as [i64; 0]);
+}
+
+#[test]
+fn project_keeps_notes_of_that_project_ignoring_case() {
+    let conn = db::open_in_memory().unwrap();
+    let mut billing = work_note("Retry 5 times", "For billing.");
+    billing.project = Some("Billing".into());
+    let billing = add_at(&conn, billing, MONDAY);
+    let mut other = work_note("Dark mode", "For the portal.");
+    other.project = Some("Billing portal".into());
+    add_at(&conn, other, MONDAY);
+    add_note(&conn, "No project", "Body.");
+
+    let filter = NoteFilter {
+        project: Some("billing".into()),
+        ..NoteFilter::default()
+    };
+
+    assert!(filter.narrows());
+    assert_eq!(ids(&conn, &filter, "2026-10-07"), [billing]);
 }

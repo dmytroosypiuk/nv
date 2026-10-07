@@ -4,7 +4,7 @@ use anyhow::{Result, anyhow, bail};
 use rusqlite::{Connection, OptionalExtension, named_params};
 
 use super::change_log::{self, Action, Actor};
-use super::note::{Note, NoteChanges, NoteDraft, NoteStatus, Source};
+use super::note::{Note, NoteChanges, NoteDraft, NoteStatus, Replacement, Source};
 use super::people::person_name;
 use crate::clock::Now;
 
@@ -231,6 +231,19 @@ impl<'c> NoteStore<'c> {
             })?;
             self.existing(new.id)
         })
+    }
+
+    /// `replace` where the newer note takes over the fields of the old one that
+    /// `newer` does not give.
+    pub fn replace_copying(
+        &self,
+        old_id: i64,
+        newer: Replacement,
+        actor: Actor,
+        now: &Now,
+    ) -> Result<Note> {
+        let draft = NoteDraft::new(self.existing(old_id)?.replacement(newer))?;
+        self.replace(old_id, &draft, actor, now)
     }
 
     /// Links two notes as related. Returns false when they were linked already.

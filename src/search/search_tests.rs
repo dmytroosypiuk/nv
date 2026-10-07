@@ -272,3 +272,21 @@ fn replaced_note_ranks_below_its_replacement() {
 
     assert_eq!(ids, [new.id, old]);
 }
+
+#[test]
+fn filter_only_search_reports_total() {
+    let conn = db::open_in_memory().unwrap();
+    let mut loader = FakeLoader::default();
+    for number in 1..=7 {
+        add_note(&conn, &format!("Note {number}"), "Retry billing calls.");
+    }
+
+    let filter_only = search(&conn, &request(None), &mut loader).unwrap();
+    // A text search ranks every note and has no cut-off: there is no total to report.
+    let with_text = search(&conn, &request(Some("retry")), &mut loader).unwrap();
+
+    assert_eq!(filter_only.note_ids.len(), 5);
+    assert_eq!(filter_only.total, Some(7));
+    assert_eq!(with_text.note_ids.len(), 5);
+    assert_eq!(with_text.total, None);
+}

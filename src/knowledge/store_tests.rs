@@ -2,7 +2,7 @@ use super::*;
 use crate::db;
 use crate::knowledge::change_log::{self, Action};
 use crate::knowledge::note::{
-    Area, CommitmentStatus, NoteFields, NoteStatus, NoteType, Source, SourceKind,
+    Area, CommitmentStatus, NoteFields, NoteStatus, NoteType, Replacement, Source, SourceKind,
 };
 
 const MONDAY: &str = "2026-10-05T09:00:00+02:00";
@@ -632,6 +632,37 @@ fn replace_marks_old_outdated_and_links_it() {
         .pop()
         .unwrap();
     assert_eq!(replace.note_before().unwrap(), Some(old));
+}
+
+#[test]
+fn replace_copying_takes_fields_from_the_old_note() {
+    let conn = db::open_in_memory().unwrap();
+    let store = NoteStore::new(&conn);
+    let old = store
+        .add(&draft("Retry 3 times"), Actor::Claude, &at(MONDAY))
+        .unwrap();
+
+    let new = store
+        .replace_copying(
+            old.id,
+            Replacement::new("Retry 5 times", "Now 5 retries."),
+            Actor::Claude,
+            &at(TUESDAY),
+        )
+        .unwrap();
+
+    assert_eq!(new.body, "Now 5 retries.");
+    assert_eq!(new.repos, old.repos);
+    assert_eq!(new.tickets, old.tickets);
+    assert_eq!(new.source, old.source);
+    assert_eq!(new.replaces, [old.id]);
+    let missing = store.replace_copying(
+        99,
+        Replacement::new("Retry 7 times", "Body."),
+        Actor::Claude,
+        &at(TUESDAY),
+    );
+    assert_eq!(missing.unwrap_err().to_string(), "note #99 not found");
 }
 
 #[test]

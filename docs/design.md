@@ -90,8 +90,8 @@ The spike confirmed the model and fixed how nv runs, stores and ranks (2026-10-0
 - **My commitments without a planned date** are not listed, only counted in one line, so they are not forgotten and do not flood the view.
 - **"Others owe you"** is every `todo` commitment with an owner, soonest first, undated last.
 - **Not in the today view:** done, dropped, outdated and expired commitments.
-- **Owner and planned date** are given on `nv add` with `--owner <person-id>` and `--planned-for <date>`, only for `--type commitment` (a rule in Rust; the SQL CHECK is the second lock). An unknown person ID is refused.
-- **The planned date changes only through `nv commitment postpone`**, which also sets a first date. The owner can be changed with `nv note edit --owner`.
+- **Owner and planned date** are given on `nv add` with `--owner <person-id>` and `--planned <date>` (was `--planned-for`, see step 7b), only for `--type commitment` (a rule in Rust; the SQL CHECK is the second lock). An unknown person ID is refused.
+- **The planned date changes through `nv commitment postpone`**, which also sets a first date. The owner can be changed with `nv note edit --owner`. Since step 7b, `nv note edit --planned` moves the date too.
 - **A done or dropped commitment keeps its type.** Changing the type and back would reopen it. Its title and body can still be edited.
 - **A note that stops being a commitment** (edit of the type, only while `todo`) loses its owner and planned date.
 - **`closed_at`** is set by `done` and `drop`. The change log gets the actions `done`, `drop` and `postpone`, each with the state before.
@@ -102,7 +102,7 @@ The spike confirmed the model and fixed how nv runs, stores and ranks (2026-10-0
 - **New commands:** `nv people add "<name>" [--role R] [--alias A]...` (the design had no way to create a person) and `nv people edit <id> [--name N] [--role R]`. On a rename the old main name stays as an alias.
 - **Full or short alias:** an alias is full when it has more than one word or contains `@` ("Anna Nowak", "Anna N.", an email). One word is short ("Anna"). A full alias and every main name belong to one person; a short alias can belong to many. Names are compared without case.
 - **`nv people search "<text>"`** shows every person whose main name or an alias contains the text, with role and all aliases, by main name. No ranking: Claude picks, or asks.
-- **People on notes:** `--person <id>` many times on `nv add`; on `nv note edit` it replaces the list. Unknown IDs are refused. Text output shows names, JSON has `people: [1, 2]`.
+- **People on notes:** `--person <id>` many times on `nv add`; on `nv note edit` it replaces the list (`--add-person` and `--remove-person` change one, see step 7b). Unknown IDs are refused. Text output shows names, JSON has `people: [1, 2]`.
 - **`nv search --person <id>`** finds notes linked to the person and commitments the person owns.
 - **Merge** `nv people merge <keep-id> <other-id>`: notes, owned commitments and aliases move to the kept person, the other main name becomes an alias, the other person is removed. The role of the kept person wins; without one, the other's is taken.
 - **Merge can be undone:** the change log entry holds both people as they were and the IDs of the notes that moved. `nv history undo` will call it.
@@ -112,7 +112,7 @@ The spike confirmed the model and fixed how nv runs, stores and ranks (2026-10-0
 
 **Decided while building links, replace, history and undo (step 6)**
 
-- **Replace:** `nv note replace <old-id>` takes the flags and stdin body of `nv add`. In one transaction the new note is saved, the old one becomes outdated and gets a `replaced_by` link. Answer: `Saved #43, replaces #17`.
+- **Replace:** `nv note replace <old-id>` takes the flags and stdin body of `nv add` (since step 7b only `--title` is required and the other fields are copied from the old note). In one transaction the new note is saved, the old one becomes outdated and gets a `replaced_by` link. Answer: `Saved #43, replaces #17`.
 - **A note is replaced by exactly one note.** Replacing an outdated note is refused; replace the newer one.
 - **Outdated ⇔ has a `replaced_by` link**, checked in Rust before every save.
 - **A note that replaced another cannot be deleted**: the old note would stay outdated with nothing saying what is true now. Undo the replace, or replace the note again.
@@ -128,10 +128,29 @@ The spike confirmed the model and fixed how nv runs, stores and ranks (2026-10-0
 **Decided while writing the Claude Code skill (step 7)**
 
 - **No SessionStart hook.** `nv today` runs when the user asks what is planned or what others owe them, or when the user runs it. Nothing runs it automatically.
-- **The skill** is `claude/skills/nv/SKILL.md`: when to save, how to write a note, dates, secrets, people, commitments, edit or replace, when to search, undo. `tests/skill.rs` checks that every command and flag in it exists in the CLI.
+- **The skill** was one file, `claude/skills/nv/SKILL.md`; step 7b split it in two. `tests/skill.rs` checks that every command and flag in the skills exists in the CLI.
 - **Permission:** `Bash(nv:*)` in `~/.claude/settings.json`; the snippet is `claude/settings.snippet.json`.
-- **Install:** `./install.sh` (per user, no root, `--dry-run`): binary to `~/.local/bin`, model to `~/.nv/models`, skill to `~/.claude/skills/nv`, permission merged into the settings. It refuses when another `nv` is on the PATH.
+- **Install:** `./install.sh` (per user, no root, `--dry-run`): binary to `~/.local/bin`, model to `~/.nv/models`, the skills to `~/.claude/skills`, permission merged into the settings. It refuses when another `nv` is on the PATH.
 - **Hand test:** `docs/skill-test.md`.
+
+**Decided while splitting the skill (step 7b)**
+
+A review of the first skill found that it would often not load for unprompted saving, and that three CLI behaviours trapped Claude: replace dropped fields, filter searches stopped at 5 without saying so, and there was no status filter.
+
+- **Two skills instead of one.** `nv-recall` (search before answering) and `nv-capture` (save the moment something comes up), each with a short description in ASD-STE100 Simplified Technical English: one sentence that says what to do, then "Use when …" with a short list of plain nouns (a decision, a promise, a person), so that small models (Haiku) read them correctly too. Each `SKILL.md` is short; the long parts are files in the same folder (`cli-read.md`; `saving-rules.md`, `template.md`, `cli-write.md`). The small shared rules (people by ID, English only, real dates) are written in both, not linked across skills.
+- **`allowed-tools: Bash(nv *)`** in the frontmatter of both skills. `Bash(nv:*)` stays in `settings.json` too, for nv commands run while no skill is loaded.
+- **Always-loaded lines in `~/.claude/CLAUDE.md`.** A skill description alone is a weak trigger when the user is not asking for anything. `install.sh` writes the text of `claude/CLAUDE.snippet.md` between the markers `# nv:start` and `# nv:end`: a second install replaces the block, everything else in the file stays, and the file is copied to `CLAUDE.md.before-nv` first. This is not a hook: still nothing runs nv automatically.
+- **Install** copies both skill folders (replacing them) and removes the old `skills/nv`. There is no uninstall command yet; the markers make one possible.
+- **Temporary company-data rule** in `nv-capture`: no customer data, internal hostnames, URLs or IPs, code from company repos or financial figures in work notes until Dmytro has checked his company's rules for AI tools. Dmytro removes it.
+- **Replace copies fields.** `nv note replace <old-id>` needs only `--title` and the body. Area, type, project, repos, tickets, people and source come from the old note; a flag overrides its field, and a list flag replaces the whole copied list. A commitment that stays a commitment also keeps its owner and planned date (otherwise replacing Anna's commitment would silently make it mine) and starts as `todo` again. `expires_on` is never copied: what is true now has its own end. Before, a replace with only a title lost the ticket, and `nv search --ticket` found only the outdated note.
+- **Edit can change one value of a list:** `--add-repo` / `--remove-repo`, `--add-ticket` / `--remove-ticket`, `--add-person` / `--remove-person`, each many times. Adding a value that is there changes nothing; removing one that is not there is refused ("note #42 has no repo ledger"), which catches typos. Plain `--repo`, `--ticket`, `--person` still replace the whole list and cannot be mixed with the add or remove form of the same list.
+- **One name for the planned date:** `--planned` on add, replace, edit and search. `--planned-for` still works on `nv add` as a hidden alias.
+- **`nv note edit --planned <date>`** moves the planned date of a `todo` commitment and is logged as `edit`. A done or dropped commitment keeps its date. `nv commitment postpone` stays, with its own log action.
+- **New search filters:** `--status todo|done|dropped` (it matches the commitment status, so it returns commitments only) and `--project <name>` (the whole name, in any case).
+- **"showing 5 of 7, use --limit"** is the last line of a filter-only search that the limit cut. A text search has no such line: it ranks every candidate and has no cut-off, so a total would mean nothing. `--json` stays a plain list.
+- **Search results show the first line of the body** (the first line that is not empty, cut at 100 characters with `…`) between the title and the details, so Claude does not need `nv note show` for every result. `nv note show` is unchanged.
+- **The today hint** names the status: `nv search --type commitment --status todo`.
+- **A password told in a sentence is refused:** `password`, `passwd` or `pwd`, then `is`, then a value of 6 or more characters with a letter and a digit that is not a placeholder or a path. "The staging password is hunter2" is refused; "the password is stored in Vault" and "pwd is /home/anna2" pass. A password without a digit still passes: the check is a safety net, and the skill says so.
 
 **Build**
 
@@ -321,7 +340,7 @@ Claude saves a note only if Dmytro will be glad to find it in a month and it is 
 | The lesson, not the story: "Library X does not support streaming" | Personal things mentioned in passing; personal notes only when asked |
 
 - **Secrets:** save how to get access instead, for example "ask DevOps in #infra-help".
-- **Safety net:** `nv add` and `nv note edit` check title, body, project and source reference for things that look like secrets (`ghp_…`, `sk-…`, `password=…`, private keys, long random strings) and refuse to save them. There is no override flag, and the error never repeats the secret.
+- **Safety net:** `nv add` and `nv note edit` check title, body, project and source reference for things that look like secrets (`ghp_…`, `sk-…`, `password=…`, "password is hunter2", private keys, long random strings) and refuse to save them. There is no override flag, and the error never repeats the secret.
 - **Not secrets:** hex-only strings (commit SHAs, UUIDs), placeholders (`password=$DB_PASSWORD`, `token=<your token>`) and plain prose ("Password: ask Anna"). A long random string is 32+ characters with lowercase, uppercase and at least three digits.
 - **Time-limited facts** get an expiry date, for example "Anna on vacation next week" expires the day after. Expired notes are hidden from search; `nv search --all` still finds them.
 - **No expiry** when no end date is known; the note is replaced when the situation changes.
@@ -354,10 +373,10 @@ A note needs only a title, a body and an area; everything else is filled when kn
 Commands are Docker-style, object first then action, with three shortcuts for daily use (session 2).
 
 ```
-nv note add                        # body from stdin
-nv note edit <id>
+nv note add                        # body from stdin; --owner and --planned for commitments
+nv note edit <id>                  # --add-repo/--remove-repo, same for ticket and person
 nv note show <id>
-nv note replace <old-id>           # same flags as add; body from stdin
+nv note replace <old-id>           # --title and body from stdin; other fields are copied
 nv note delete <id>
 nv note link <id> <id>             # related
 nv note search "<query>" [filters]
@@ -375,7 +394,8 @@ nv people alias <id> "<alias>"
 nv people merge <keep-id> <other-id>   # by ID: names are not unique
 
 nv history [--note <id>] [--person <id>] [--limit N]   # change log, newest first
-nv history undo [<change-id>]      # without an ID: the newest change that still stands
+nv history undo [<change-id>]      # without an ID: the newest change that still stands;
+                                   # only the last change of a note or person can be undone
 
 nv model reindex                   # embed every note again
 nv model info                      # model, folder, embedded and pending counts
@@ -402,10 +422,14 @@ EOF
 ```
 #42  decision · work · 2026-10-06 · active
      Retry 5 times for billing-api
+     We agreed with Anna to use 5 retries.
      project: Billing · repos: billing-api · tickets: PAY-1234 · people: Anna Nowak
 
 #17  decision · work · 2026-09-12 · outdated → #42
      Retry 3 times
+     We retry billing calls 3 times.
+
+showing 2 of 7, use --limit
 ```
 
 Today view (`--json` gives `today`, `mine`, `owed` with `owner_name`, and `undated`):
@@ -419,7 +443,7 @@ Others owe you
 #3  Anna Nowak: Review the retry PR · planned 2026-10-08
 #4  Piotr Zielinski: Send the staging access steps
 
-2 more of yours have no date: nv search --type commitment
+2 more of yours have no date: nv search --type commitment --status todo
 ```
 
 Nothing to show: `Nothing planned for today.`
@@ -434,14 +458,17 @@ History:
 
 - A note with no type shows `note`. A commitment shows `todo`, `done` or `dropped` in place of `active`.
 - The details line holds owner, planned date, project, repos, tickets, people, source, expiry date, `replaces: #17` and `related: #5, #9`, only those that are set. A commitment of mine shows no owner.
-- `nv note show` prints the same lines, then an empty line and the body.
+- A search result shows the first line of the body under the title, cut at 100 characters. `nv note show` prints the header, title and details, then an empty line and the whole body.
+- `showing 2 of 7, use --limit` ends a search with only filters when there are more notes than the limit. A text search never has this line.
 - `nv add` answers `Saved #42` (`Edited #42`, `Deleted #42`); with `--json`, the whole note.
 - No results: `No notes found.` Search `--json` is a list of notes, each with its `rank`.
 - Exit codes: 0 ok, 1 nv refused or failed (not found, broken rule, secret), 2 wrong usage.
 
-**Edit:** each flag replaces that field; `--repo` and `--ticket` replace the whole list. The body changes only with `--body`, which reads the new body from stdin.
+**Edit:** each flag replaces that field; `--repo`, `--ticket` and `--person` replace the whole list, while `--add-repo`, `--remove-repo` and the same for ticket and person change one value. `--planned` moves the date of a todo commitment. The body changes only with `--body`, which reads the new body from stdin. A field cannot be cleared.
 
-**Search filters**, all combinable: `--area`, `--type`, `--repo`, `--ticket`, `--person <id>` (notes about the person and commitments they own), `--since <date>`, `--planned <date>` (commitments planned for that date), `--all` (include expired), `--limit` (default 5). A search with only filters and no text is allowed, for example `nv search --ticket PAY-1234`; it does not load the model.
+**Replace:** `--title` and the body are new; area, type, project, repos, tickets, people and source are copied from the old note unless a flag gives them. A commitment keeps owner and planned date. The expiry date is not copied.
+
+**Search filters**, all combinable: `--area`, `--type`, `--status todo|done|dropped` (commitments only), `--project` (whole name, any case), `--repo`, `--ticket`, `--person <id>` (notes about the person and commitments they own), `--since <date>`, `--planned <date>` (commitments planned for that date), `--all` (include expired), `--limit` (default 5). A search with only filters and no text is allowed, for example `nv search --ticket PAY-1234`; it does not load the model.
 
 **People** are always addressed by ID; `nv people search` shows every match with aliases and role, so Claude sees which Anna before it links or merges.
 
@@ -544,7 +571,7 @@ Design and the embedding spike are done; next is the CLI, then the Claude Code s
 - [x] Note template: required and optional fields, writing rules (session 2)
 - [x] Spike: bge-small-en-v1.5 in Rust with fastembed-rs, offline, on 25 real notes (`spikes/embedding/REPORT.md`)
 - [x] Build the CLI: skeleton and schema, notes and change log, embeddings and hybrid search, commitments, people, links, replace, history and undo
-- [x] Write the Claude Code skill: when to save, when to search, saving rules, template (`claude/skills/nv/SKILL.md`)
+- [x] Write the Claude Code skills: `nv-recall` (when and how to search) and `nv-capture` (when to save, saving rules, template), in `claude/skills/`
 - [ ] Install it (`./install.sh`) and run the hand test in a real session (`docs/skill-test.md`)
 - [ ] Build and test on the work laptop's OS; check `nv` is a free command name there
 - [ ] Check company rules for using Claude Code with project data

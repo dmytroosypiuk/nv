@@ -72,6 +72,10 @@ fn allows_the_word_password_in_plain_text() {
         "Password: ask Anna",
         "Run with password=$DB_PASSWORD from the environment",
         "Set token=<your token> in the config",
+        "The password is stored in Vault",
+        "The password is rotated every 90 days",
+        "pwd is /home/user2/app",
+        "The password is in 1Password, ask Anna",
     ] {
         assert_eq!(find_secret(text), None, "{text}");
     }
@@ -82,4 +86,20 @@ fn error_does_not_repeat_the_secret() {
     let kind = find_secret("password=hunter2").unwrap();
     assert!(!kind.to_string().contains("hunter2"));
     assert!(kind.to_string().contains("password"), "{kind}");
+}
+
+#[test]
+fn refuses_password_written_in_a_sentence() {
+    for text in [
+        "Staging DB password is hunter2 by the way",
+        "pwd is Tr0ub4dor",
+        "the passwd was changed, new password is `s3cretpw`.",
+        "passwd = hunter2",
+    ] {
+        assert_eq!(
+            find_secret(text),
+            Some(SecretKind::PasswordAssignment),
+            "{text}"
+        );
+    }
 }

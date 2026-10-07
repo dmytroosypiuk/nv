@@ -483,3 +483,236 @@ fn edit_keeps_links() {
     assert_eq!(edited.replaced_by, Some(43));
     assert_eq!(edited.status, NoteStatus::Outdated);
 }
+
+// ----- edit: planned date -----
+
+#[test]
+fn edit_planned_moves_date_of_todo_commitment() {
+    let later = NoteChanges {
+        planned_for: Some("2026-10-12".parse().unwrap()),
+        ..NoteChanges::default()
+    };
+
+    let edited = commitment(CommitmentStatus::Todo).edited(&later).unwrap();
+
+    assert_eq!(edited.planned_for, Some("2026-10-12".parse().unwrap()));
+    assert_eq!(edited.owner, Some(7));
+}
+
+#[test]
+fn edit_planned_on_done_commitment_or_fact_is_refused() {
+    let later = NoteChanges {
+        planned_for: Some("2026-10-12".parse().unwrap()),
+        ..NoteChanges::default()
+    };
+
+    assert_eq!(
+        commitment(CommitmentStatus::Done)
+            .edited(&later)
+            .unwrap_err(),
+        NoteError::ClosedCommitmentKeepsDate {
+            status: CommitmentStatus::Done
+        }
+    );
+    assert_eq!(
+        note().edited(&later).unwrap_err(),
+        NoteError::OnlyCommitments {
+            field: "a planned date"
+        }
+    );
+}
+
+// ----- edit: add to and remove from the lists -----
+
+fn note_with_lists() -> Note {
+    Note {
+        repos: vec!["billing-api".into(), "gateway".into()],
+        tickets: vec!["PAY-1234".into(), "PAY-1300".into()],
+        people: vec![7, 9],
+        ..note()
+    }
+}
+
+#[test]
+fn edit_adds_repo_and_keeps_the_others() {
+    let changes = NoteChanges {
+        add_repos: vec!["ledger".into()],
+        add_tickets: vec!["PAY-1400".into()],
+        add_people: vec![12],
+        ..NoteChanges::default()
+    };
+
+    let edited = note_with_lists().edited(&changes).unwrap();
+
+    assert_eq!(edited.repos, ["billing-api", "gateway", "ledger"]);
+    assert_eq!(edited.tickets, ["PAY-1234", "PAY-1300", "PAY-1400"]);
+    assert_eq!(edited.people, [7, 9, 12]);
+}
+
+#[test]
+fn edit_removes_ticket() {
+    let changes = NoteChanges {
+        remove_repos: vec!["gateway".into()],
+        remove_tickets: vec!["PAY-1234".into()],
+        remove_people: vec![7],
+        ..NoteChanges::default()
+    };
+
+    let edited = note_with_lists().edited(&changes).unwrap();
+
+    assert_eq!(edited.repos, ["billing-api"]);
+    assert_eq!(edited.tickets, ["PAY-1300"]);
+    assert_eq!(edited.people, [9]);
+}
+
+#[test]
+fn edit_add_of_existing_value_changes_nothing() {
+    let changes = NoteChanges {
+        add_repos: vec!["gateway".into()],
+        add_people: vec![9],
+        ..NoteChanges::default()
+    };
+
+    assert_eq!(
+        note_with_lists().edited(&changes).unwrap(),
+        note_with_lists()
+    );
+}
+
+#[test]
+fn edit_remove_of_missing_value_is_refused() {
+    let wrong_repo = NoteChanges {
+        remove_repos: vec!["biling-api".into()],
+        ..NoteChanges::default()
+    };
+    let wrong_person = NoteChanges {
+        remove_people: vec![12],
+        ..NoteChanges::default()
+    };
+
+    let error = note_with_lists().edited(&wrong_repo).unwrap_err();
+    assert_eq!(
+        error,
+        NoteError::NotOnNote {
+            id: 42,
+            what: "repo",
+            value: "biling-api".into()
+        }
+    );
+    assert_eq!(error.to_string(), "note #42 has no repo biling-api");
+    assert_eq!(
+        note_with_lists()
+            .edited(&wrong_person)
+            .unwrap_err()
+            .to_string(),
+        "note #42 has no person #12"
+    );
+}
+
+#[test]
+fn edit_repo_still_replaces_whole_list() {
+    let changes = NoteChanges {
+        repos: Some(vec!["ledger".into()]),
+        ..NoteChanges::default()
+    };
+
+    let edited = note_with_lists().edited(&changes).unwrap();
+
+    assert_eq!(edited.repos, ["ledger"]);
+    assert_eq!(edited.tickets, ["PAY-1234", "PAY-1300"]);
+}
+
+// ----- replace: what the newer note takes over -----
+
+fn sourced_note() -> Note {
+    Note {
+        project: Some("Billing".into()),
+        source: Some(Source {
+            kind: SourceKind::Meeting,
+            reference: "Sprint planning".into(),
+        }),
+        expires_on: Some("2026-12-31".parse().unwrap()),
+        ..note_with_lists()
+    }
+}
+
+#[test]
+fn replacement_copies_area_type_project_repos_tickets_people_source() {
+    let newer = sourced_note().replacement(Replacement::new("Retry 7 times", "We use 7 retries."));
+
+    assert_eq!(newer.title, "Retry 7 times");
+    assert_eq!(newer.body, "We use 7 retries.");
+    assert_eq!(newer.area, Area::Work);
+    assert_eq!(newer.note_type, Some(NoteType::Decision));
+    assert_eq!(newer.project.as_deref(), Some("Billing"));
+    assert_eq!(newer.repos, ["billing-api", "gateway"]);
+    assert_eq!(newer.tickets, ["PAY-1234", "PAY-1300"]);
+    assert_eq!(newer.people, [7, 9]);
+    assert_eq!(newer.source, sourced_note().source);
+}
+
+#[test]
+fn replacement_flag_overrides_copied_field() {
+    let newer = sourced_note().replacement(Replacement {
+        area: Some(Area::Learning),
+        note_type: Some(NoteType::Fact),
+        project: Some("Payments".into()),
+        repos: Some(vec!["ledger".into()]),
+        tickets: Some(vec!["PAY-1500".into()]),
+        people: Some(vec![12]),
+        source: Some(Source {
+            kind: SourceKind::Chat,
+            reference: "Teams".into(),
+        }),
+        ..Replacement::new("Retry 7 times", "We use 7 retries.")
+    });
+
+    assert_eq!(newer.area, Area::Learning);
+    assert_eq!(newer.note_type, Some(NoteType::Fact));
+    assert_eq!(newer.project.as_deref(), Some("Payments"));
+    assert_eq!(newer.repos, ["ledger"]);
+    assert_eq!(newer.tickets, ["PAY-1500"]);
+    assert_eq!(newer.people, [12]);
+    assert_eq!(newer.source.unwrap().kind, SourceKind::Chat);
+}
+
+#[test]
+fn replacement_of_commitment_keeps_owner_and_planned_date() {
+    let old = commitment(CommitmentStatus::Todo);
+
+    let same = old.replacement(Replacement::new("Review the PR", "Body."));
+    let moved = old.replacement(Replacement {
+        owner: Some(9),
+        planned_for: Some("2026-10-12".parse().unwrap()),
+        ..Replacement::new("Review the PR", "Body.")
+    });
+
+    assert_eq!(same.owner, Some(7));
+    assert_eq!(same.planned_for, Some("2026-10-08".parse().unwrap()));
+    assert_eq!(moved.owner, Some(9));
+    assert_eq!(moved.planned_for, Some("2026-10-12".parse().unwrap()));
+}
+
+#[test]
+fn replacement_with_other_type_drops_owner_and_planned_date() {
+    let newer = commitment(CommitmentStatus::Todo).replacement(Replacement {
+        note_type: Some(NoteType::Fact),
+        ..Replacement::new("The PR was reviewed", "Body.")
+    });
+
+    assert_eq!(newer.owner, None);
+    assert_eq!(newer.planned_for, None);
+    assert!(NoteDraft::new(newer).is_ok());
+}
+
+#[test]
+fn replacement_does_not_copy_expiry() {
+    let copied = sourced_note().replacement(Replacement::new("Title", "Body."));
+    let given = sourced_note().replacement(Replacement {
+        expires_on: Some("2027-01-31".parse().unwrap()),
+        ..Replacement::new("Title", "Body.")
+    });
+
+    assert_eq!(copied.expires_on, None);
+    assert_eq!(given.expires_on, Some("2027-01-31".parse().unwrap()));
+}

@@ -62,89 +62,228 @@ fn help_of(command: &str) -> String {
     panic!("the skill uses a command nv does not have: {command}");
 }
 
-#[test]
-fn skill_has_name_and_description() {
-    let skill = repo_file("claude/skills/nv/SKILL.md");
+/// The two skills and the commands each one must show, in `SKILL.md` or a file next to it.
+const SKILLS: [(&str, &[&str]); 2] = [
+    (
+        "nv-recall",
+        &[
+            "nv search ",
+            "nv note show ",
+            "nv today",
+            "nv people search ",
+            "nv people list",
+            "nv history",
+        ],
+    ),
+    (
+        "nv-capture",
+        &[
+            "nv search ",
+            "nv add ",
+            "nv note edit ",
+            "nv note replace ",
+            "nv note delete ",
+            "nv note link ",
+            "nv commitment done ",
+            "nv commitment drop ",
+            "nv commitment postpone ",
+            "nv people search ",
+            "nv people add ",
+            "nv people alias ",
+            "nv people merge ",
+            "nv history undo",
+        ],
+    ),
+];
 
-    let frontmatter = skill
-        .strip_prefix("---\n")
-        .and_then(|rest| rest.split_once("\n---\n"))
-        .expect("SKILL.md starts with a frontmatter block")
-        .0;
+fn skill_dir(skill: &str) -> std::path::PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("claude/skills")
+        .join(skill)
+}
 
-    assert!(
-        frontmatter.lines().any(|line| line == "name: nv"),
-        "{frontmatter}"
-    );
-    let description = frontmatter
-        .lines()
-        .find_map(|line| line.strip_prefix("description: "))
-        .expect("a one-line description");
-    assert!(
-        description.len() > 80,
-        "the description says when to use nv"
-    );
+/// Every Markdown file of a skill, `SKILL.md` and the files it links to, as one text.
+fn whole_skill(skill: &str) -> String {
+    let mut files: Vec<_> = fs::read_dir(skill_dir(skill))
+        .unwrap_or_else(|_| panic!("the skill {skill} has no folder"))
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.extension().is_some_and(|extension| extension == "md"))
+        .collect();
+    files.sort();
+    let texts: Vec<String> = files
+        .iter()
+        .map(|path| fs::read_to_string(path).unwrap())
+        .collect();
+    texts.join("\n")
+}
+
+fn skill_md(skill: &str) -> String {
+    repo_file(&format!("claude/skills/{skill}/SKILL.md"))
 }
 
 #[test]
-fn skill_uses_only_commands_and_flags_that_exist() {
-    let skill = repo_file("claude/skills/nv/SKILL.md");
-    let commands = nv_commands(&skill);
-    assert!(
-        commands.len() >= 15,
-        "found only {} commands",
-        commands.len()
-    );
+fn each_skill_has_name_description_and_allowed_tools() {
+    for (skill, _) in SKILLS {
+        let text = skill_md(skill);
+        let frontmatter = text
+            .strip_prefix("---\n")
+            .and_then(|rest| rest.split_once("\n---\n"))
+            .expect("SKILL.md starts with a frontmatter block")
+            .0;
 
-    for command in &commands {
-        let help = help_of(command);
-        for word in command.split_whitespace() {
-            if let Some(flag) = word.strip_prefix("--") {
-                let flag = flag.split('=').next().unwrap();
-                assert!(
-                    help.contains(&format!("--{flag}")),
-                    "`--{flag}` is not a flag of: {command}"
-                );
-            }
-        }
-    }
-    // The commands Claude needs every day are all shown.
-    for needed in [
-        "nv add ",
-        "nv search ",
-        "nv today",
-        "nv note edit ",
-        "nv note replace ",
-        "nv note delete ",
-        "nv note show ",
-        "nv note link ",
-        "nv commitment done ",
-        "nv commitment drop ",
-        "nv commitment postpone ",
-        "nv people search ",
-        "nv people add ",
-        "nv people alias ",
-        "nv people merge ",
-        "nv history",
-        "nv history undo",
-    ] {
+        let lines: Vec<&str> = frontmatter.lines().collect();
         assert!(
-            commands
-                .iter()
-                .any(|command| command.starts_with(needed.trim_end())
-                    && (command.len() == needed.trim_end().len() || command.starts_with(needed))),
-            "the skill does not show `{}`",
-            needed.trim_end()
+            lines.contains(&format!("name: {skill}").as_str()),
+            "{frontmatter}"
+        );
+        assert!(
+            lines.contains(&"allowed-tools: Bash(nv *)"),
+            "{frontmatter}"
+        );
+        let description = frontmatter
+            .lines()
+            .find_map(|line| line.strip_prefix("description: "))
+            .expect("a one-line description");
+        assert!(
+            description.len() > 80 && description.contains("Use when"),
+            "the description of {skill} says when to use it"
         );
     }
 }
 
 #[test]
-fn skill_tells_the_rules_that_nv_cannot_check() {
-    let skill = repo_file("claude/skills/nv/SKILL.md").to_lowercase();
+fn skills_use_only_commands_and_flags_that_exist() {
+    for (skill, needed_commands) in SKILLS {
+        let commands = nv_commands(&whole_skill(skill));
+        assert!(
+            commands.len() >= 10,
+            "{skill}: found only {} commands",
+            commands.len()
+        );
 
-    for rule in ["english", "secret", "<<'eof'", "real date", "outdated →"] {
-        assert!(skill.contains(rule), "the skill does not mention: {rule}");
+        for command in &commands {
+            let help = help_of(command);
+            for word in command.split_whitespace() {
+                if let Some(flag) = word.strip_prefix("--") {
+                    let flag = flag.split('=').next().unwrap();
+                    assert!(
+                        help.contains(&format!("--{flag} "))
+                            || help.contains(&format!("--{flag}\n")),
+                        "{skill}: `--{flag}` is not a flag of: {command}"
+                    );
+                }
+            }
+        }
+        // The commands Claude needs every day are all shown.
+        for needed in needed_commands {
+            let name = needed.trim_end();
+            assert!(
+                commands
+                    .iter()
+                    .any(|command| command == name || command.starts_with(&format!("{name} "))),
+                "{skill} does not show `{name}`"
+            );
+        }
+    }
+}
+
+#[test]
+fn skill_files_linked_from_skill_md_exist() {
+    for (skill, linked) in [
+        ("nv-recall", vec!["cli-read.md"]),
+        (
+            "nv-capture",
+            vec!["saving-rules.md", "template.md", "cli-write.md"],
+        ),
+    ] {
+        let text = skill_md(skill);
+        for file in linked {
+            assert!(
+                text.contains(&format!("]({file})")),
+                "{skill}/SKILL.md does not link to {file}"
+            );
+            assert!(skill_dir(skill).join(file).is_file(), "{skill}/{file}");
+        }
+        // Each skill stands alone: no link into the other one.
+        assert!(!text.contains("](../"), "{skill} links across skills");
+        assert!(
+            text.lines().count() <= 120,
+            "{skill}/SKILL.md is short; long parts go to the linked files"
+        );
+    }
+}
+
+#[test]
+fn old_nv_skill_is_gone() {
+    assert!(!skill_dir("nv").exists());
+}
+
+#[test]
+fn skills_tell_the_rules_that_nv_cannot_check() {
+    let recall = skill_md("nv-recall").to_lowercase();
+    let capture = skill_md("nv-capture").to_lowercase();
+
+    // The small shared rules are written in both, not linked.
+    for (skill, text) in [("nv-recall", &recall), ("nv-capture", &capture)] {
+        for rule in ["english", "real date", "by id"] {
+            assert!(text.contains(rule), "{skill} does not mention: {rule}");
+        }
+    }
+    for rule in ["outdated →", "--limit 50", "nv ranks, it does not judge"] {
+        assert!(recall.contains(rule), "nv-recall does not mention: {rule}");
+    }
+    for rule in [
+        "<<'eof'",
+        "safety net",
+        "never about whether to save",
+        "planned for fri 2026-10-09",
+        "flags you give override the copied fields",
+    ] {
+        assert!(
+            capture.contains(rule),
+            "nv-capture does not mention: {rule}"
+        );
+    }
+}
+
+#[test]
+fn capture_carries_the_temporary_company_data_rule() {
+    let capture = skill_md("nv-capture");
+    let one_line = capture.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    assert!(one_line.contains(
+        "Until Dmytro confirms his company's rules for AI tools, keep work notes free of \
+         confidential company data: no customer data, no internal hostnames, URLs or IPs, \
+         no code copied from company repos, no financial figures. Decisions, promises and \
+         how-tos in general words are fine. Dmytro will remove this rule."
+    ));
+}
+
+#[test]
+fn capture_examples_use_add_and_remove_flags_and_planned() {
+    let capture = nv_commands(&whole_skill("nv-capture")).join("\n");
+
+    for flag in [
+        "--add-repo",
+        "--add-person",
+        "--remove-ticket",
+        "--planned ",
+    ] {
+        assert!(capture.contains(flag), "no example uses {flag}");
+    }
+    for (skill, _) in SKILLS {
+        assert!(!whole_skill(skill).contains("--planned-for"), "{skill}");
+    }
+}
+
+#[test]
+fn claude_md_snippet_has_markers_and_names_both_skills() {
+    let snippet = repo_file("claude/CLAUDE.snippet.md");
+
+    assert!(snippet.starts_with("# nv:start\n"), "{snippet}");
+    assert!(snippet.ends_with("# nv:end\n"), "{snippet}");
+    for word in ["nv-capture", "nv-recall", "`nv`"] {
+        assert!(snippet.contains(word), "the snippet does not name {word}");
     }
 }
 

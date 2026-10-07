@@ -4,13 +4,17 @@ use anyhow::Result;
 use rusqlite::{Connection, params};
 
 use crate::clock::Date;
-use crate::knowledge::note::{Area, NoteType};
+use crate::knowledge::note::{Area, CommitmentStatus, NoteType};
 
 /// All filters combine with AND.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct NoteFilter {
     pub area: Option<Area>,
     pub note_type: Option<NoteType>,
+    /// Commitments that are todo, done or dropped; other notes have no such status.
+    pub status: Option<CommitmentStatus>,
+    /// The whole project name, in any case.
+    pub project: Option<String>,
     pub repo: Option<String>,
     pub ticket: Option<String>,
     /// Notes linked to this person, and commitments the person owns.
@@ -35,6 +39,8 @@ impl NoteFilter {
     pub fn narrows(&self) -> bool {
         self.area.is_some()
             || self.note_type.is_some()
+            || self.status.is_some()
+            || self.project.is_some()
             || self.repo.is_some()
             || self.ticket.is_some()
             || self.person.is_some()
@@ -59,6 +65,8 @@ impl NoteFilter {
                AND (?7 OR expires_on IS NULL OR expires_on >= ?8)
                AND (?9 IS NULL OR owner_person_id = ?9 OR EXISTS
                      (SELECT 1 FROM note_people WHERE note_id = notes.id AND person_id = ?9))
+               AND (?10 IS NULL OR commitment_status = ?10)
+               AND (?11 IS NULL OR project = ?11 COLLATE NOCASE)
              ORDER BY created_at DESC, id DESC",
         )?;
         let candidates = statement.query_map(
@@ -72,6 +80,8 @@ impl NoteFilter {
                 self.include_expired,
                 today.to_string(),
                 self.person,
+                self.status.map(|status| status.as_str()),
+                self.project,
             ],
             |row| {
                 Ok(Candidate {

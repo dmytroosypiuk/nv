@@ -34,17 +34,24 @@ pub struct ShownNote {
 }
 
 pub fn full_note(out: &mut dyn Write, shown: &ShownNote) -> Result<()> {
-    write!(out, "{}", summary(shown))?;
+    write!(out, "{}", summary(shown, false))?;
     writeln!(out, "\n{}", shown.note.body)?;
     Ok(())
 }
 
-pub fn found_notes(out: &mut dyn Write, notes: &[ShownNote]) -> Result<()> {
+/// The found notes, each with the first line of its body. `total` is how many notes a
+/// filter-only search found: when the limit cut the list, the last line says so.
+pub fn found_notes(out: &mut dyn Write, notes: &[ShownNote], total: Option<usize>) -> Result<()> {
     if notes.is_empty() {
         writeln!(out, "No notes found.")?;
     }
-    let summaries: Vec<String> = notes.iter().map(summary).collect();
+    let summaries: Vec<String> = notes.iter().map(|shown| summary(shown, true)).collect();
     write!(out, "{}", summaries.join("\n"))?;
+    if let Some(total) = total
+        && total > notes.len()
+    {
+        writeln!(out, "\nshowing {} of {total}, use --limit", notes.len())?;
+    }
     Ok(())
 }
 
@@ -106,7 +113,7 @@ pub fn today(out: &mut dyn Write, view: &TodayView) -> Result<()> {
     }
     if view.undated > 0 {
         sections.push(format!(
-            "{} more of yours have no date: nv search --type commitment\n",
+            "{} more of yours have no date: nv search --type commitment --status todo\n",
             view.undated
         ));
     }
@@ -201,8 +208,12 @@ pub fn embedded(out: &mut dyn Write, notes: usize) -> Result<()> {
     Ok(())
 }
 
-/// Two or three lines: ID, type, area, date and status; the title; then the details.
-fn summary(shown: &ShownNote) -> String {
+/// How much of the first body line a search result shows.
+const FIRST_LINE_LENGTH: usize = 100;
+
+/// Two to four lines: ID, type, area, date and status; the title; the first line of the
+/// body when `with_first_line`; then the details.
+fn summary(shown: &ShownNote, with_first_line: bool) -> String {
     let note = &shown.note;
     let id = format!("#{}  ", note.id);
     let indent = " ".repeat(id.len());
@@ -220,11 +231,24 @@ fn summary(shown: &ShownNote) -> String {
         status_word(note),
         note.title
     );
+    if with_first_line && let Some(line) = first_line(&note.body) {
+        text.push_str(&format!("{indent}{line}\n"));
+    }
     let details = details(shown);
     if !details.is_empty() {
         text.push_str(&format!("{indent}{}\n", details.join(" · ")));
     }
     text
+}
+
+/// The first line of the body that is not empty, cut when it is long.
+fn first_line(body: &str) -> Option<String> {
+    let line = body.lines().map(str::trim).find(|line| !line.is_empty())?;
+    if line.chars().count() <= FIRST_LINE_LENGTH {
+        return Some(line.to_string());
+    }
+    let cut: String = line.chars().take(FIRST_LINE_LENGTH).collect();
+    Some(format!("{}…", cut.trim_end()))
 }
 
 /// A commitment shows where it stands (todo, done, dropped) unless it is outdated.

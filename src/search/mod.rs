@@ -33,6 +33,9 @@ pub struct SearchRequest<'a> {
 pub struct SearchOutcome {
     /// Best first.
     pub note_ids: Vec<i64>,
+    /// How many notes a filter-only search found before `limit` cut the list. A text
+    /// search ranks every note and has no cut-off, so it has no total.
+    pub total: Option<usize>,
     /// Vectors were needed but the model is not installed: keyword search only.
     pub model_missing: bool,
 }
@@ -48,6 +51,7 @@ pub fn search(
     let candidates = request.filter.candidates(conn, request.today)?;
     let text = request.text.map(str::trim).filter(|text| !text.is_empty());
 
+    let total = text.is_none().then_some(candidates.len());
     let mut model_missing = false;
     let mut ranked: Vec<i64> = match text {
         // Filter-only search: newest first, and no model.
@@ -100,6 +104,7 @@ pub fn search(
 
     Ok(SearchOutcome {
         note_ids: ranked,
+        total,
         model_missing,
     })
 }

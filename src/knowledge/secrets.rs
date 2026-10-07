@@ -39,6 +39,10 @@ static ASSIGNMENT: LazyLock<Regex> = LazyLock::new(|| {
     )
     .unwrap()
 });
+/// A password told in a sentence: "the staging password is hunter2".
+static PASSWORD_IN_A_SENTENCE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?i)\b(?:password|passwd|pwd)\s+is\s+["'`]?([^\s"'`]+)"#).unwrap()
+});
 static LONG_WORD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[A-Za-z0-9_+-]{32,}").unwrap());
 
 /// The first thing in `text` that looks like a secret, if any.
@@ -52,6 +56,9 @@ pub fn find_secret(text: &str) -> Option<SecretKind> {
     } else if ASSIGNMENT
         .captures_iter(text)
         .any(|found| assigns_a_real_value(&found[1], &found[2]))
+        || PASSWORD_IN_A_SENTENCE
+            .captures_iter(text)
+            .any(|found| assigns_a_real_value("is", &found[1]))
     {
         Some(SecretKind::PasswordAssignment)
     } else if LONG_WORD
@@ -64,18 +71,25 @@ pub fn find_secret(text: &str) -> Option<SecretKind> {
     }
 }
 
-/// `password=hunter2` is a secret; `password=$DB_PASSWORD` and "Password: ask Anna" are not.
+/// `password=hunter2` and "password is hunter2" are secrets; `password=$DB_PASSWORD`,
+/// "Password: ask Anna" and "the password is stored in Vault" are not.
 fn assigns_a_real_value(separator: &str, value: &str) -> bool {
     let is_placeholder = value.starts_with(['$', '<', '{', '%'])
         || value.chars().all(|c| matches!(c, '*' | 'x' | 'X' | '.'));
     if is_placeholder {
         return false;
     }
-    // After a colon plain words are normal prose, so ask for something password-like.
-    separator == "="
-        || (value.len() >= 8
-            && value.chars().any(|c| c.is_ascii_digit())
-            && value.chars().any(|c| c.is_ascii_alphabetic()))
+    // After a colon or "is" plain words are normal prose, so ask for something
+    // password-like. "pwd is /home/anna2" is a folder.
+    let shortest = match separator {
+        "=" => return true,
+        "is" if value.starts_with(['/', '~']) => return false,
+        "is" => 6,
+        _ => 8,
+    };
+    value.len() >= shortest
+        && value.chars().any(|c| c.is_ascii_digit())
+        && value.chars().any(|c| c.is_ascii_alphabetic())
 }
 
 /// Mixed case with several digits. Hex-only strings (commit SHAs, UUIDs) are fine.

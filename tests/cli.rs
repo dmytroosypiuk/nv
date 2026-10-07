@@ -349,13 +349,16 @@ fn search_output_matches_golden_text() {
             "\
 #2  commitment · work · 2026-10-06 · todo
     Send retry numbers to Anna
+    Promised on the daily.
 
 #1  decision · work · 2026-10-05 · active
     Retry 5 times
+    We agreed with Anna to use 5 retries.
     project: Billing · repos: billing-api · tickets: PAY-1234 · source: meeting, Sprint planning
 
 #3  note · learning · 2026-10-06 · active
     Backoff
+    A retry should wait longer each time.
 ",
         );
 }
@@ -626,17 +629,13 @@ fn add_commitments(nv_home: &TempDir) {
     add_commitment(
         nv_home,
         "Send retry numbers to Anna",
-        &["--planned-for", "2026-10-07"],
+        &["--planned", "2026-10-07"],
     );
-    add_commitment(
-        nv_home,
-        "Book the exam slot",
-        &["--planned-for", "2026-10-05"],
-    );
+    add_commitment(nv_home, "Book the exam slot", &["--planned", "2026-10-05"]);
     add_commitment(
         nv_home,
         "Review the retry PR",
-        &["--owner", "1", "--planned-for", "2026-10-08"],
+        &["--owner", "1", "--planned", "2026-10-08"],
     );
     add_commitment(nv_home, "Send the staging access steps", &["--owner", "2"]);
     add_commitment(nv_home, "Read the SQLite book", &[]);
@@ -668,7 +667,7 @@ Others owe you
 #3  Anna Nowak: Review the retry PR · planned 2026-10-08
 #4  Piotr Zielinski: Send the staging access steps
 
-2 more of yours have no date: nv search --type commitment
+2 more of yours have no date: nv search --type commitment --status todo
 ",
         );
 }
@@ -832,6 +831,7 @@ fn planned_filter_finds_commitment_by_date() {
             "\
 #3  commitment · work · 2026-10-05 · todo
     Review the retry PR
+    Promised on the daily.
     owner: Anna Nowak · planned: 2026-10-08
 ",
         );
@@ -846,7 +846,7 @@ fn planned_for_without_commitment_type_fails() {
         .args([
             "add", "--title", "Exam", "--area", "learning", "--type", "fact",
         ])
-        .args(["--planned-for", "2026-10-08"])
+        .args(["--planned", "2026-10-08"])
         .write_stdin("The exam is on Thursday.")
         .assert()
         .code(1)
@@ -1262,10 +1262,12 @@ fn replace_output_and_search_output_shows_outdated_arrow_to_newer_note() {
             "\
 #2  decision · work · 2026-10-06 · active
     Retry 5 times for billing-api
+    Agreed with Anna because of timeouts.
     replaces: #1
 
 #1  decision · work · 2026-10-05 · outdated → #2
     Retry 3 times
+    Body.
 ",
         );
     let old = stdout_json(nv(&nv_home).args(["note", "show", "1", "--json"]));
@@ -1473,6 +1475,7 @@ fn undo_last_change_then_history_shows_it_undone() {
             "\
 #1  decision · work · 2026-10-05 · active
     Retry 3 times
+    Body.
 ",
         );
 }
@@ -1553,4 +1556,318 @@ fn undo_of_merge_warns_about_nothing_and_brings_person_back() {
         .args(["people", "search", "Anna N."])
         .assert()
         .stdout("#3  Anna N.\n");
+}
+
+// ----- one name for the planned date, lists on edit, replace copies fields -----
+
+#[test]
+fn add_takes_planned_date() {
+    let nv_home = TempDir::new().unwrap();
+    add_commitment(&nv_home, "Book the exam slot", &["--planned", "2026-10-08"]);
+
+    let note = stdout_json(nv(&nv_home).args(["note", "show", "1", "--json"]));
+    assert_eq!(note["planned_for"], "2026-10-08");
+}
+
+#[test]
+fn planned_for_still_works_and_is_hidden_from_help() {
+    let nv_home = TempDir::new().unwrap();
+    add_commitment(
+        &nv_home,
+        "Book the exam slot",
+        &["--planned-for", "2026-10-08"],
+    );
+
+    let note = stdout_json(nv(&nv_home).args(["note", "show", "1", "--json"]));
+    assert_eq!(note["planned_for"], "2026-10-08");
+    nv(&nv_home)
+        .args(["add", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--planned <PLANNED>"))
+        .stdout(predicate::str::contains("--planned-for").not());
+}
+
+#[test]
+fn edit_planned_is_logged_as_edit() {
+    let nv_home = TempDir::new().unwrap();
+    add_commitment(&nv_home, "Book the exam slot", &["--planned", "2026-10-08"]);
+    add_plain_note(&nv_home, "Retry 3 times", MONDAY);
+
+    nv(&nv_home)
+        .args(["note", "edit", "1", "--planned", "2026-10-12"])
+        .assert()
+        .success()
+        .stdout("Edited #1\n");
+
+    let note = stdout_json(nv(&nv_home).args(["note", "show", "1", "--json"]));
+    assert_eq!(note["planned_for"], "2026-10-12");
+    nv(&nv_home)
+        .args(["history", "--note", "1", "--limit", "1"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("  edit  "));
+    nv(&nv_home)
+        .args(["note", "edit", "2", "--planned", "2026-10-12"])
+        .assert()
+        .code(1)
+        .stderr("nv: only a commitment has a planned date: use --type commitment\n");
+    nv(&nv_home)
+        .args(["commitment", "done", "1"])
+        .assert()
+        .success();
+    nv(&nv_home)
+        .args(["note", "edit", "1", "--planned", "2026-10-13"])
+        .assert()
+        .code(1)
+        .stderr("nv: a done commitment keeps its planned date\n");
+}
+
+#[test]
+fn edit_add_person_keeps_other_people() {
+    let nv_home = TempDir::new().unwrap();
+    add_people(&nv_home);
+    add_note_about(&nv_home, "Retry 5 times", &["1"]);
+
+    nv(&nv_home)
+        .args(["note", "edit", "1", "--add-person", "2"])
+        .args(["--add-repo", "billing-api", "--add-ticket", "PAY-1234"])
+        .assert()
+        .success();
+    let note = stdout_json(nv(&nv_home).args(["note", "show", "1", "--json"]));
+    assert_eq!(note["people"], json!([1, 2]));
+    assert_eq!(note["repos"], json!(["billing-api"]));
+    assert_eq!(note["tickets"], json!(["PAY-1234"]));
+
+    nv(&nv_home)
+        .args(["note", "edit", "1", "--remove-person", "1"])
+        .args(["--add-repo", "gateway", "--remove-ticket", "PAY-1234"])
+        .assert()
+        .success();
+    let note = stdout_json(nv(&nv_home).args(["note", "show", "1", "--json"]));
+    assert_eq!(note["people"], json!([2]));
+    assert_eq!(note["repos"], json!(["billing-api", "gateway"]));
+    assert_eq!(note["tickets"], json!([]));
+
+    nv(&nv_home)
+        .args(["note", "edit", "1", "--remove-repo", "ledger"])
+        .assert()
+        .code(1)
+        .stderr("nv: note #1 has no repo ledger\n");
+
+    // The change is one entry in the change log and can be taken back.
+    nv(&nv_home).args(["history", "undo"]).assert().success();
+    let note = stdout_json(nv(&nv_home).args(["note", "show", "1", "--json"]));
+    assert_eq!(note["people"], json!([1, 2]));
+    assert_eq!(note["repos"], json!(["billing-api"]));
+}
+
+#[test]
+fn edit_repo_with_add_repo_is_a_usage_error() {
+    let nv_home = TempDir::new().unwrap();
+    add_retry_note(&nv_home);
+
+    for (whole_list, one_more) in [
+        (["--repo", "ledger"], ["--add-repo", "gateway"]),
+        (["--ticket", "PAY-1"], ["--remove-ticket", "PAY-1234"]),
+        (["--person", "1"], ["--add-person", "2"]),
+    ] {
+        nv(&nv_home)
+            .args(["note", "edit", "1"])
+            .args(whole_list)
+            .args(one_more)
+            .assert()
+            .code(2)
+            .stderr(predicate::str::contains("cannot be used with"));
+    }
+}
+
+#[test]
+fn replace_with_only_title_keeps_ticket_filter_working() {
+    let nv_home = TempDir::new().unwrap();
+    add_retry_note(&nv_home);
+
+    nv(&nv_home)
+        .args(["note", "replace", "1", "--title", "Retry 7 times"])
+        .write_stdin("Retry count is 7 (was 5).")
+        .assert()
+        .success()
+        .stdout("Saved #2, replaces #1\n");
+
+    let newer = stdout_json(nv(&nv_home).args(["note", "show", "2", "--json"]));
+    assert_eq!(newer["area"], "work");
+    assert_eq!(newer["type"], "decision");
+    assert_eq!(newer["project"], "Billing");
+    assert_eq!(newer["repos"], json!(["billing-api"]));
+    assert_eq!(newer["tickets"], json!(["PAY-1234"]));
+    assert_eq!(newer["source"]["kind"], "meeting");
+    let found = stdout_json(nv(&nv_home).args(["search", "--ticket", "PAY-1234", "--json"]));
+    assert_eq!(found[0]["id"], 2);
+    assert_eq!(found[1]["id"], 1);
+}
+
+#[test]
+fn replace_flags_override_copied_fields_and_commitment_keeps_owner() {
+    let nv_home = TempDir::new().unwrap();
+    add_people(&nv_home);
+    add_commitment(
+        &nv_home,
+        "Review the retry PR",
+        &[
+            "--owner",
+            "1",
+            "--planned",
+            "2026-10-08",
+            "--repo",
+            "billing-api",
+        ],
+    );
+
+    nv(&nv_home)
+        .args(["note", "replace", "1", "--title", "Review both retry PRs"])
+        .args(["--repo", "gateway", "--planned", "2026-10-12"])
+        .write_stdin("Anna Nowak reviews both PRs.")
+        .assert()
+        .success();
+
+    let newer = stdout_json(nv(&nv_home).args(["note", "show", "2", "--json"]));
+    assert_eq!(newer["type"], "commitment");
+    assert_eq!(newer["commitment_status"], "todo");
+    assert_eq!(newer["owner_person_id"], 1);
+    assert_eq!(newer["planned_for"], "2026-10-12");
+    assert_eq!(newer["repos"], json!(["gateway"]));
+}
+
+// ----- search: status and project filters, the total, the first body line -----
+
+#[test]
+fn search_status_todo_hides_done_commitments() {
+    let nv_home = TempDir::new().unwrap();
+    add_commitments(&nv_home);
+    nv(&nv_home)
+        .args(["commitment", "done", "5"])
+        .assert()
+        .success();
+
+    let todo =
+        stdout_json(nv(&nv_home).args(["search", "--status", "todo", "--limit", "50", "--json"]));
+    let done = stdout_json(nv(&nv_home).args(["search", "--status", "done", "--json"]));
+
+    let todo_ids: Vec<i64> = todo
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|note| note["id"].as_i64().unwrap())
+        .collect();
+    assert_eq!(todo_ids, [6, 4, 3, 2, 1]);
+    assert_eq!(done.as_array().unwrap().len(), 1);
+    assert_eq!(done[0]["id"], 5);
+}
+
+#[test]
+fn search_with_unknown_status_names_the_allowed_ones() {
+    let nv_home = TempDir::new().unwrap();
+
+    nv(&nv_home)
+        .args(["search", "--status", "open"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains(
+            "unknown commitment status 'open': use todo, done, dropped",
+        ));
+}
+
+#[test]
+fn search_by_project_finds_its_notes() {
+    let nv_home = TempDir::new().unwrap();
+    add_retry_note(&nv_home);
+    add_plain_note(&nv_home, "Retry 3 times", MONDAY);
+
+    let found = stdout_json(nv(&nv_home).args(["search", "--project", "billing", "--json"]));
+
+    assert_eq!(found.as_array().unwrap().len(), 1);
+    assert_eq!(found[0]["id"], 1);
+}
+
+#[test]
+fn filter_only_search_says_when_more_exist() {
+    let nv_home = TempDir::new().unwrap();
+    add_commitments(&nv_home);
+
+    let output = nv(&nv_home)
+        .args(["search", "--type", "commitment", "--limit", "2"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let text = String::from_utf8(output).unwrap();
+    assert!(
+        text.ends_with("    Promised on the daily.\n\nshowing 2 of 6, use --limit\n"),
+        "{text}"
+    );
+}
+
+#[test]
+fn no_showing_line_when_all_fit_or_on_text_search() {
+    let nv_home = TempDir::new().unwrap();
+    add_commitments(&nv_home);
+
+    nv(&nv_home)
+        .args(["search", "--type", "commitment", "--limit", "6"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("showing").not());
+    nv(&nv_home)
+        .args(["search", "promised daily", "--limit", "2"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("showing").not());
+}
+
+#[test]
+fn search_shows_first_body_line_cut_at_100_characters() {
+    let nv_home = TempDir::new().unwrap();
+    let long_line = "word ".repeat(30);
+    nv(&nv_home)
+        .args(["add", "--title", "Long", "--area", "work"])
+        .write_stdin(format!("\n\n{long_line}\nSecond line.\n"))
+        .assert()
+        .success();
+
+    let first_hundred: String = long_line.chars().take(100).collect();
+    nv(&nv_home)
+        .args(["search", "--area", "work"])
+        .assert()
+        .success()
+        .stdout(format!(
+            "#1  note · work · 2026-10-06 · active\n    Long\n    {}…\n",
+            first_hundred.trim_end()
+        ));
+}
+
+#[test]
+fn show_does_not_repeat_first_line() {
+    let nv_home = TempDir::new().unwrap();
+    add_plain_note(&nv_home, "Retry 3 times", MONDAY);
+
+    nv(&nv_home)
+        .args(["note", "show", "1"])
+        .assert()
+        .success()
+        .stdout("#1  decision · work · 2026-10-05 · active\n    Retry 3 times\n\nBody.\n");
+}
+
+#[test]
+fn add_refuses_password_written_in_a_sentence() {
+    let nv_home = TempDir::new().unwrap();
+
+    nv(&nv_home)
+        .args(["add", "--title", "Staging DB access", "--area", "work"])
+        .write_stdin("Staging DB password is hunter2 by the way.")
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("hunter2").not())
+        .stderr(predicate::str::contains("nv never stores secrets"));
 }

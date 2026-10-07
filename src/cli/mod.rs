@@ -19,7 +19,8 @@ use crate::db;
 use crate::knowledge::change_log::{Action, Actor};
 use crate::knowledge::history::{HistoryFilter, history, undo};
 use crate::knowledge::note::{
-    Area, Note, NoteChanges, NoteDraft, NoteFields, NoteType, Source, SourceKind,
+    Area, CommitmentStatus, Note, NoteChanges, NoteDraft, NoteFields, NoteType, Replacement,
+    Source, SourceKind,
 };
 use crate::knowledge::people::{PeopleStore, person_name};
 use crate::knowledge::store::NoteStore;
@@ -211,18 +212,51 @@ struct AddArgs {
     #[arg(long)]
     owner: Option<i64>,
     /// Commitments: the day it is planned for, like 2026-10-08
-    #[arg(long)]
-    planned_for: Option<Date>,
+    #[arg(long, alias = "planned-for")]
+    planned: Option<Date>,
     #[arg(long)]
     json: bool,
 }
 
+/// Area, type, project, repos, tickets, people and source are copied from the old note;
+/// a flag given here overrides that field.
 #[derive(Debug, Args)]
 struct ReplaceArgs {
     /// The note that is no longer true
     old_id: i64,
-    #[command(flatten)]
-    note: AddArgs,
+    #[arg(long)]
+    title: String,
+    /// Copied from the old note when left out, like every flag below but --expires-on
+    #[arg(long)]
+    area: Option<Area>,
+    #[arg(long = "type")]
+    note_type: Option<NoteType>,
+    #[arg(long)]
+    project: Option<String>,
+    /// Replaces all repos copied from the old note
+    #[arg(long = "repo")]
+    repos: Option<Vec<String>>,
+    /// Replaces all tickets copied from the old note
+    #[arg(long = "ticket")]
+    tickets: Option<Vec<String>>,
+    /// Replaces all people copied from the old note
+    #[arg(long = "person")]
+    people: Option<Vec<i64>>,
+    #[arg(long, requires = "source_ref")]
+    source_kind: Option<SourceKind>,
+    #[arg(long, requires = "source_kind")]
+    source_ref: Option<String>,
+    /// Never copied: the last day the new note is true, like 2026-10-12
+    #[arg(long)]
+    expires_on: Option<Date>,
+    /// Commitments: ID of the person who promised
+    #[arg(long)]
+    owner: Option<i64>,
+    /// Commitments: the day it is planned for, like 2026-10-08
+    #[arg(long)]
+    planned: Option<Date>,
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Debug, Args)]
@@ -246,15 +280,33 @@ struct EditArgs {
     note_type: Option<NoteType>,
     #[arg(long)]
     project: Option<String>,
-    /// Replaces all repos of the note
-    #[arg(long = "repo")]
+    /// Replaces all repos of the note; to change one, use --add-repo or --remove-repo
+    #[arg(long = "repo", conflicts_with_all = ["add_repos", "remove_repos"])]
     repos: Option<Vec<String>>,
-    /// Replaces all tickets of the note
-    #[arg(long = "ticket")]
+    /// Adds one repo and keeps the others; can be given many times
+    #[arg(long = "add-repo", value_name = "REPO")]
+    add_repos: Vec<String>,
+    /// Takes one repo out; can be given many times
+    #[arg(long = "remove-repo", value_name = "REPO")]
+    remove_repos: Vec<String>,
+    /// Replaces all tickets of the note; to change one, use --add-ticket or --remove-ticket
+    #[arg(long = "ticket", conflicts_with_all = ["add_tickets", "remove_tickets"])]
     tickets: Option<Vec<String>>,
-    /// Replaces all people of the note
-    #[arg(long = "person")]
+    /// Adds one ticket and keeps the others; can be given many times
+    #[arg(long = "add-ticket", value_name = "TICKET")]
+    add_tickets: Vec<String>,
+    /// Takes one ticket out; can be given many times
+    #[arg(long = "remove-ticket", value_name = "TICKET")]
+    remove_tickets: Vec<String>,
+    /// Replaces all people of the note; to change one, use --add-person or --remove-person
+    #[arg(long = "person", conflicts_with_all = ["add_people", "remove_people"])]
     people: Option<Vec<i64>>,
+    /// Adds one person by ID and keeps the others; can be given many times
+    #[arg(long = "add-person", value_name = "PERSON")]
+    add_people: Vec<i64>,
+    /// Takes one person out by ID; can be given many times
+    #[arg(long = "remove-person", value_name = "PERSON")]
+    remove_people: Vec<i64>,
     #[arg(long, requires = "source_ref")]
     source_kind: Option<SourceKind>,
     #[arg(long, requires = "source_kind")]
@@ -264,6 +316,9 @@ struct EditArgs {
     /// Commitments: ID of the person who promised
     #[arg(long)]
     owner: Option<i64>,
+    /// Commitments that are still todo: the day it is planned for, like 2026-10-08
+    #[arg(long)]
+    planned: Option<Date>,
     #[arg(long)]
     json: bool,
 }
@@ -280,7 +335,10 @@ struct DeleteArgs {
     clap::ArgGroup::new("what")
         .required(true)
         .multiple(true)
-        .args(["query", "area", "note_type", "repo", "ticket", "person", "since", "planned"])
+        .args([
+            "query", "area", "note_type", "status", "project", "repo", "ticket", "person", "since",
+            "planned",
+        ])
 ))]
 struct SearchArgs {
     /// What to look for, in English. Can be left out when a filter is given
@@ -289,6 +347,12 @@ struct SearchArgs {
     area: Option<Area>,
     #[arg(long = "type")]
     note_type: Option<NoteType>,
+    /// Commitments only: todo, done or dropped
+    #[arg(long)]
+    status: Option<CommitmentStatus>,
+    /// The whole project name, in any case
+    #[arg(long)]
+    project: Option<String>,
     #[arg(long)]
     repo: Option<String>,
     #[arg(long)]
@@ -305,7 +369,7 @@ struct SearchArgs {
     /// Include expired notes
     #[arg(long)]
     all: bool,
-    /// How many notes to show at most
+    /// How many notes to show at most; a search with only filters says when there are more
     #[arg(long, default_value_t = 5)]
     limit: usize,
     #[arg(long)]
@@ -346,8 +410,22 @@ pub fn run(cli: Cli, context: &mut Context<'_>, streams: Streams<'_>) -> Result<
             output::change(out, "Saved", &note, as_json)
         }
         Command::Note(NoteCommand::Replace(args)) => {
-            let as_json = args.note.json;
-            let note = store.replace(args.old_id, &draft(args.note, stdin)?, actor, &now)?;
+            let as_json = args.json;
+            let newer = Replacement {
+                title: args.title,
+                body: read_body(stdin)?,
+                area: args.area,
+                note_type: args.note_type,
+                project: args.project,
+                repos: args.repos,
+                tickets: args.tickets,
+                people: args.people,
+                source: Source::from_parts(args.source_kind, args.source_ref)?,
+                expires_on: args.expires_on,
+                owner: args.owner,
+                planned_for: args.planned,
+            };
+            let note = store.replace_copying(args.old_id, newer, actor, &now)?;
             embed_in_background(context);
             if as_json {
                 output::json(out, &note)
@@ -387,6 +465,13 @@ pub fn run(cli: Cli, context: &mut Context<'_>, streams: Streams<'_>) -> Result<
                 source: Source::from_parts(args.source_kind, args.source_ref)?,
                 expires_on: args.expires_on,
                 owner: args.owner,
+                planned_for: args.planned,
+                add_repos: args.add_repos,
+                add_tickets: args.add_tickets,
+                add_people: args.add_people,
+                remove_repos: args.remove_repos,
+                remove_tickets: args.remove_tickets,
+                remove_people: args.remove_people,
             };
             let note = store.edit(args.id, &changes, actor, &now)?;
             embed_in_background(context);
@@ -402,6 +487,8 @@ pub fn run(cli: Cli, context: &mut Context<'_>, streams: Streams<'_>) -> Result<
                 filter: NoteFilter {
                     area: args.area,
                     note_type: args.note_type,
+                    status: args.status,
+                    project: args.project,
                     repo: args.repo,
                     ticket: args.ticket,
                     person: args.person,
@@ -429,7 +516,7 @@ pub fn run(cli: Cli, context: &mut Context<'_>, streams: Streams<'_>) -> Result<
             if args.json {
                 output::found_notes_json(out, &found)
             } else {
-                output::found_notes(out, &found)
+                output::found_notes(out, &found, outcome.total)
             }
         }
         Command::Today(args) | Command::Commitment(CommitmentCommand::Today(args)) => {
@@ -577,7 +664,7 @@ pub fn run(cli: Cli, context: &mut Context<'_>, streams: Streams<'_>) -> Result<
     }
 }
 
-/// Builds the new note of `nv add` and `nv note replace`; the body comes from stdin.
+/// Builds the new note of `nv add`; the body comes from stdin.
 fn draft(args: AddArgs, stdin: &mut dyn Read) -> Result<NoteDraft> {
     Ok(NoteDraft::new(NoteFields {
         title: args.title,
@@ -591,7 +678,7 @@ fn draft(args: AddArgs, stdin: &mut dyn Read) -> Result<NoteDraft> {
         source: Source::from_parts(args.source_kind, args.source_ref)?,
         expires_on: args.expires_on,
         owner: args.owner,
-        planned_for: args.planned_for,
+        planned_for: args.planned,
     })?)
 }
 

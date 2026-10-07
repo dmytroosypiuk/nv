@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Installs nv for the current user: the binary, the embedding model, the Claude Code
-# skill and the permission to run nv. No root needed. Never touches nv.db.
+# Installs nv for the current user: the binary, the embedding model, the two Claude Code
+# skills, the permission to run nv and the nv lines in CLAUDE.md. No root needed. Never
+# touches nv.db. Running it again replaces what it installed before.
 #
 #   ./install.sh            install
 #   ./install.sh --dry-run  only print what would be done
@@ -8,7 +9,8 @@
 # Where things go (override with the env vars):
 #   NV_BIN_DIR         ~/.local/bin        the nv binary
 #   NV_HOME            ~/.nv               models/ (and later nv.db)
-#   CLAUDE_CONFIG_DIR  ~/.claude           skills/nv/SKILL.md, settings.json
+#   CLAUDE_CONFIG_DIR  ~/.claude           skills/nv-recall, skills/nv-capture,
+#                                          settings.json, CLAUDE.md
 set -euo pipefail
 
 dry_run=false
@@ -55,9 +57,17 @@ echo "== model -> $nv_home/models/$model"
 run mkdir -p "$nv_home/models/$model"
 run cp -u "$repo/models/$model/"* "$nv_home/models/$model/"
 
-echo "== skill -> $claude_dir/skills/nv"
-run mkdir -p "$claude_dir/skills/nv"
-run cp "$repo/claude/skills/nv/SKILL.md" "$claude_dir/skills/nv/SKILL.md"
+for skill in nv-recall nv-capture; do
+  echo "== skill -> $claude_dir/skills/$skill"
+  run mkdir -p "$claude_dir/skills"
+  run rm -rf "$claude_dir/skills/$skill"
+  run cp -r "$repo/claude/skills/$skill" "$claude_dir/skills/$skill"
+done
+# The one skill of earlier versions was split into the two above.
+if [[ -d "$claude_dir/skills/nv" ]]; then
+  echo "== old skill, no longer used"
+  run rm -r "$claude_dir/skills/nv"
+fi
 
 echo "== permission $permission -> $claude_dir/settings.json"
 settings="$claude_dir/settings.json"
@@ -74,6 +84,41 @@ else
   if ! $dry_run; then
     jq --arg p "$permission" '.permissions.allow = ((.permissions.allow // []) + [$p])' \
       "$settings.before-nv" > "$settings"
+  fi
+fi
+
+# The lines that tell every session that nv exists. They live between two markers, so
+# that installing again replaces them and everything else in the file stays.
+claude_md="$claude_dir/CLAUDE.md"
+snippet="$repo/claude/CLAUDE.snippet.md"
+block_start='# nv:start'
+block_end='# nv:end'
+echo "== nv lines ($block_start … $block_end) -> $claude_md"
+if [[ ! -e "$claude_md" ]]; then
+  run cp "$snippet" "$claude_md"
+elif ! grep -qxF "$block_start" "$claude_md"; then
+  run cp "$claude_md" "$claude_md.before-nv"
+  echo "+ add the nv lines at the end"
+  if ! $dry_run; then
+    { echo; cat "$snippet"; } >> "$claude_md"
+  fi
+elif ! grep -qxF "$block_end" "$claude_md"; then
+  echo "error: $claude_md has '$block_start' but no '$block_end'" >&2
+  echo "       remove the broken nv lines, then run again" >&2
+  exit 1
+elif awk -v from="$block_start" -v to="$block_end" \
+    '$0 == from { inside = 1 } inside { print } $0 == to { inside = 0 }' "$claude_md" |
+    cmp -s - "$snippet"; then
+  echo "already there"
+else
+  run cp "$claude_md" "$claude_md.before-nv"
+  echo "+ replace the nv lines"
+  if ! $dry_run; then
+    awk -v from="$block_start" -v to="$block_end" -v snippet="$snippet" '
+      $0 == from { while ((getline line < snippet) > 0) print line; inside = 1 }
+      !inside { print }
+      $0 == to { inside = 0 }
+    ' "$claude_md.before-nv" > "$claude_md"
   fi
 fi
 

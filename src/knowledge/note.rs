@@ -29,6 +29,14 @@ pub enum NoteError {
     OnlyCommitments { field: &'static str },
     #[error("a {status} commitment keeps its type")]
     ClosedCommitmentKeepsType { status: CommitmentStatus },
+    #[error("a {status} commitment keeps its planned date")]
+    ClosedCommitmentKeepsDate { status: CommitmentStatus },
+    #[error("note #{id} has no {what} {value}")]
+    NotOnNote {
+        id: i64,
+        what: &'static str,
+        value: String,
+    },
     #[error(
         "the {field} looks like it holds {kind}. nv never stores secrets: \
          save how to get access instead"
@@ -263,6 +271,45 @@ pub struct NoteChanges {
     pub source: Option<Source>,
     pub expires_on: Option<Date>,
     pub owner: Option<i64>,
+    /// Commitments that are still todo only.
+    pub planned_for: Option<Date>,
+    /// Added to the list; a value that is already there changes nothing.
+    pub add_repos: Vec<String>,
+    pub add_tickets: Vec<String>,
+    pub add_people: Vec<i64>,
+    /// Taken out of the list; a value that is not there is refused.
+    pub remove_repos: Vec<String>,
+    pub remove_tickets: Vec<String>,
+    pub remove_people: Vec<i64>,
+}
+
+/// What a newer note says when it replaces an old one; `None` copies the old value.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Replacement {
+    pub title: String,
+    pub body: String,
+    pub area: Option<Area>,
+    pub note_type: Option<NoteType>,
+    pub project: Option<String>,
+    pub repos: Option<Vec<String>>,
+    pub tickets: Option<Vec<String>>,
+    pub people: Option<Vec<i64>>,
+    pub source: Option<Source>,
+    /// Never copied: what is true now has its own end.
+    pub expires_on: Option<Date>,
+    pub owner: Option<i64>,
+    pub planned_for: Option<Date>,
+}
+
+impl Replacement {
+    /// A replacement that copies everything it can from the old note.
+    pub fn new(title: &str, body: &str) -> Self {
+        Self {
+            title: title.into(),
+            body: body.into(),
+            ..Self::default()
+        }
+    }
 }
 
 /// A saved note.
@@ -321,21 +368,52 @@ impl Note {
             // Otherwise changing the type and back would reopen it.
             return Err(NoteError::ClosedCommitmentKeepsType { status });
         }
+        if changes.planned_for.is_some()
+            && let Some(status @ (CommitmentStatus::Done | CommitmentStatus::Dropped)) =
+                self.commitment_status
+        {
+            return Err(NoteError::ClosedCommitmentKeepsDate { status });
+        }
         // A note that stops being a commitment loses what only commitments have.
         let stays_commitment = note_type == Some(NoteType::Commitment);
+        let not_on_note = |what, value: String| NoteError::NotOnNote {
+            id: self.id,
+            what,
+            value,
+        };
+        let repos = changed_list(
+            changes.repos.unwrap_or_else(|| self.repos.clone()),
+            changes.add_repos,
+            &changes.remove_repos,
+        )
+        .map_err(|repo| not_on_note("repo", repo))?;
+        let tickets = changed_list(
+            changes.tickets.unwrap_or_else(|| self.tickets.clone()),
+            changes.add_tickets,
+            &changes.remove_tickets,
+        )
+        .map_err(|ticket| not_on_note("ticket", ticket))?;
+        let people = changed_list(
+            changes.people.unwrap_or_else(|| self.people.clone()),
+            changes.add_people,
+            &changes.remove_people,
+        )
+        .map_err(|person| not_on_note("person", format!("#{person}")))?;
         let fields = NoteFields {
             title: changes.title.unwrap_or_else(|| self.title.clone()),
             body: changes.body.unwrap_or_else(|| self.body.clone()),
             area: changes.area.unwrap_or(self.area),
             note_type,
             project: changes.project.or_else(|| self.project.clone()),
-            repos: changes.repos.unwrap_or_else(|| self.repos.clone()),
-            tickets: changes.tickets.unwrap_or_else(|| self.tickets.clone()),
-            people: changes.people.unwrap_or_else(|| self.people.clone()),
+            repos,
+            tickets,
+            people,
             source: changes.source.or_else(|| self.source.clone()),
             expires_on: changes.expires_on.or(self.expires_on),
             owner: changes.owner.or(self.owner.filter(|_| stays_commitment)),
-            planned_for: self.planned_for.filter(|_| stays_commitment),
+            planned_for: changes
+                .planned_for
+                .or(self.planned_for.filter(|_| stays_commitment)),
         }
         .checked()?;
 
@@ -369,7 +447,52 @@ impl Note {
     }
 }
 
+/// The list without `remove` and with `add` at the end. Gives back the first value of
+/// `remove` that is not in the list.
+fn changed_list<T: PartialEq + Clone>(
+    mut list: Vec<T>,
+    add: Vec<T>,
+    remove: &[T],
+) -> Result<Vec<T>, T> {
+    for value in remove {
+        let Some(position) = list.iter().position(|kept| kept == value) else {
+            return Err(value.clone());
+        };
+        list.remove(position);
+    }
+    for value in add {
+        if !list.contains(&value) {
+            list.push(value);
+        }
+    }
+    Ok(list)
+}
+
 impl Note {
+    /// The fields of the newer note that replaces this one: area, type, project, repos,
+    /// tickets, people and source are copied unless `newer` gives its own. A commitment
+    /// that stays a commitment keeps its owner and planned date too.
+    pub fn replacement(&self, newer: Replacement) -> NoteFields {
+        let note_type = newer.note_type.or(self.note_type);
+        let stays_commitment = note_type == Some(NoteType::Commitment);
+        NoteFields {
+            title: newer.title,
+            body: newer.body,
+            area: newer.area.unwrap_or(self.area),
+            note_type,
+            project: newer.project.or_else(|| self.project.clone()),
+            repos: newer.repos.unwrap_or_else(|| self.repos.clone()),
+            tickets: newer.tickets.unwrap_or_else(|| self.tickets.clone()),
+            people: newer.people.unwrap_or_else(|| self.people.clone()),
+            source: newer.source.or_else(|| self.source.clone()),
+            expires_on: newer.expires_on,
+            owner: newer.owner.or(self.owner.filter(|_| stays_commitment)),
+            planned_for: newer
+                .planned_for
+                .or(self.planned_for.filter(|_| stays_commitment)),
+        }
+    }
+
     /// This note marked outdated, with the link to the newer note that replaces it.
     pub fn replaced_by_note(&self, newer_id: i64) -> Result<Note, NoteError> {
         if newer_id == self.id {

@@ -233,6 +233,7 @@ fn search_text_output_with_filters_matches_golden_text() {
         "\
 #1  decision · work · 2026-10-05 · active
     Retry 5 times
+    For billing calls.
     repos: billing-api
 "
     );
@@ -246,6 +247,7 @@ fn search_text_output_with_filters_matches_golden_text() {
         "\
 #3  note · work · 2026-10-05 · active
     Anna is on vacation
+    Retry asking her on Monday.
     expires: 2026-10-06
 "
     );
@@ -275,7 +277,7 @@ fn today_does_not_load_model() {
     nv.add(
         "Send retry numbers",
         "Promised.",
-        &["--type", "commitment", "--planned-for", "2026-10-07"],
+        &["--type", "commitment", "--planned", "2026-10-07"],
     );
 
     let today = nv.run(&["today"], "");
