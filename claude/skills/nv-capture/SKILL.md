@@ -6,32 +6,34 @@ allowed-tools: Bash(nv *)
 
 # nv-capture: save what is worth keeping
 
-nv is the user's local notes store. You write the notes; the user rarely runs nv by hand.
-If you do not save a decision or a passing "I'll do it", it is lost.
+nv is the user's local notes store. You write the notes. What you do not save is lost.
 
 ## Steps, every time
 
-1. **Search first**: `nv search` on the same topic. If a note is already there, edit or
+1. **List the items.** Write one note for each item: each decision, each promise, each
+   fact. A promise by another person is its own commitment with `--owner`
+   ("Anna will review the PR by Friday"). Do not put it inside a different note.
+2. **Search first**: `nv search` on the same topic. If a note is already there, edit or
    replace it instead of making a duplicate.
-2. **Save right away.** Ask about missing facts, never about whether to save. If the note
+3. **Save right away.** Ask about missing facts, never about whether to save. If the note
    needs a detail you do not have (which Anna, which date, which repo), ask that one
-   question; a note with a guess in it is worse.
-3. **Confirm in one line**, with the weekday for any date: "Saved to nv: #42 Use
+   question; a note with a guess in it is worse. A promise with no clear day ("next
+   week") is still a promise: ask for the day, do not drop it.
+4. **Confirm in one line**, with the weekday for any date: "Saved to nv: #42 Use
    PostgreSQL 16 for reporting" or "Saved to nv: #43 Send retry numbers to Anna,
    planned for Fri 2026-10-09". nv prints the weekday (`Saved #43, planned Fri
    2026-10-09`). Copy the weekday from the answer of nv; do not calculate it. If the
    weekday is not the one the user said, the date is wrong: correct it.
 
-Save when the user will be glad to find it in a month and it is hard to find anywhere
-else: decisions, commitments, ideas, root causes, people's availability and roles, setup
-and how-to knowledge, limits and traps of tools. Do not save routine steps, what git or
-the repo docs already show, or personal things said in passing. The full table is in
-[saving-rules.md](saving-rules.md).
+Save decisions, commitments, ideas, root causes, people's availability and roles, how-to
+knowledge, limits of tools. Do not save routine steps, what git or the repo docs already
+show, or personal things said in passing. The full table: [saving-rules.md](saving-rules.md).
 
 ## How to save
 
 Fields are flags. The body comes from stdin; always use a quoted heredoc (`<<'EOF'`), so
-code, quotes and `$` arrive unchanged.
+code, quotes and `$` arrive unchanged. Run nv commands as they are: no `cd`, no
+`2>/dev/null`.
 
 ```
 nv search "database version reporting service"
@@ -62,7 +64,8 @@ EOF
 - **Write in English**, also when the user speaks Ukrainian or Polish. The search model
   is English only.
 - **Turn relative dates into real dates.** "Tomorrow" and "Friday" become `2026-10-08`,
-  from today's date in your context, in the text and in every date flag.
+  from today's date in your context, in the text and in every date flag. In the body,
+  write the date without the name of the weekday.
 - More examples of good notes are in [template.md](template.md).
 
 ## Secrets
@@ -76,8 +79,8 @@ job. Save how to get access instead: "Staging database password: ask DevOps in
 
 People are addressed by ID: a name is not unique. Before `--person` or `--owner`, run
 `nv people search "anna"`. One match that fits: use that ID. Several, and the context
-does not decide: ask. No match: `nv people add "Anna Nowak" --role "QA lead"`, with the
-role only when the user said it.
+does not decide: ask. No match: `nv people add "<name the user said>"`. Add
+`--role "<role>"` only when the user said the role.
 
 ## Commitments
 

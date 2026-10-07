@@ -152,6 +152,7 @@ A review of the first skill found that it would often not load for unprompted sa
 - **Answers name the weekday.** `Saved #43, planned Thu 2026-10-08`, `Saved #44, expires Sat 2026-11-14`, `Edited #43, planned …`, `Saved #45, replaces #43, planned …`, `Postponed #43 to Mon 2026-10-12`. In the hand test Haiku saved the right date but told the user "Wed 2026-10-08": a small model cannot be trusted to work out a weekday, so nv prints it and the skill says to copy it.
 - **The start of the body in search results is the first paragraph joined into one line**, cut at 100 characters. Bodies are wrapped at about 88 characters, so one line stopped in the middle of a sentence.
 - **`nv-capture/SKILL.md` must be enough alone.** Haiku did not read the linked files: it tried `--type root-cause` and `--type deadline`, put an HR deadline in area `personal` without source or expiry, and copied "(was 3)" from the skill's example into a note. So the areas, the five types, source and expiry are listed in `SKILL.md` itself, with the rules "write only what the user said" and "never copy facts from an example", and the main example is about a different topic than the hand test. `tests/skill.rs` checks this.
+- **Second Haiku run (same day):** the types, area, expiry and weekdays were right. Still wrong: Anna's promise was written inside the decision note instead of its own commitment, with "Friday 2026-10-11" (a Sunday); the exam promise was dropped; Anna got the role "QA lead", copied from the example in the People section. So the first step of `nv-capture` is now "list the items, one note for each item, a promise by another person is its own commitment", a promise without a clear day must be asked about, the people example uses placeholders (`"<name the user said>"`), and the body carries dates without weekday names.
 - **The today hint** names the status: `nv search --type commitment --status todo`.
 - **A password told in a sentence is refused:** `password`, `passwd` or `pwd`, then `is`, then a value of 6 or more characters with a letter and a digit that is not a placeholder or a path. "The staging password is hunter2" is refused; "the password is stored in Vault" and "pwd is /home/anna2" pass. A password without a digit still passes: the check is a safety net, and the skill says so.
 
@@ -581,6 +582,8 @@ Design and the embedding spike are done; next is the CLI, then the Claude Code s
 
 **Later, not MVP**
 
+- Weekday check: `nv add` and `nv note edit` refuse a title or body where a weekday name stands next to a date that is a different day ("Friday 2026-10-11" → "2026-10-11 is a Sunday"). A safety net like the secret check. From the hand test on 2026-10-07: Haiku wrote that date in a body, where nv could not see it
+- Date helper: a command such as `nv date` that prints today and the next 14 days with their weekdays, so that Claude looks a date up instead of calculating it. The skill would say so. From the same hand test: small models get "Friday" wrong and the skills allow only `nv`, so they cannot run `date`
 - Notifications for planned commitments
 - Conflict check when saving a new note
 - Approval step before saving

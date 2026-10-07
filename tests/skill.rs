@@ -273,9 +273,16 @@ fn capture_skill_md_alone_is_enough_for_a_correct_note() {
         "write only what the user said",
         "never copy facts from an example",
         "copy the weekday from the answer of nv",
+        "one note for each item",
+        "a promise by another person is its own commitment",
     ] {
         assert!(lower.contains(rule), "SKILL.md does not say: {rule}");
     }
+    // Haiku copied the role of the example person into the store: no real-looking role.
+    assert!(
+        !capture.contains("QA lead"),
+        "an example role can be copied"
+    );
 }
 
 #[test]
