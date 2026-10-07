@@ -326,6 +326,55 @@ fn claude_md_snippet_has_markers_and_names_both_skills() {
     }
 }
 
+/// The skill for developers of nv, in `.claude/skills` (read by Claude Code in this
+/// project). It is not installed: `claude/skills` holds the skills of the product.
+#[test]
+fn agentic_testing_skill_is_a_project_skill_with_its_driver() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(".claude/skills/agentic-testing");
+    let text = repo_file(".claude/skills/agentic-testing/SKILL.md");
+
+    let frontmatter = text
+        .strip_prefix("---\n")
+        .and_then(|rest| rest.split_once("\n---\n"))
+        .expect("SKILL.md starts with a frontmatter block")
+        .0;
+    assert!(
+        frontmatter
+            .lines()
+            .any(|line| line == "name: agentic-testing")
+    );
+    let description = frontmatter
+        .lines()
+        .find_map(|line| line.strip_prefix("description: "))
+        .expect("a one-line description");
+    assert!(description.len() > 80 && description.contains("Use when"));
+
+    // What the hand tests of 2026-10-07 taught: these are the rules that cost time.
+    let lower = text.to_lowercase();
+    for rule in [
+        "nv_home",
+        "claude_code_force_session_persistence",
+        "subagent",
+        "claude -p",
+        "never approve",
+        "names only",
+        "docs/skill-test.md",
+    ] {
+        assert!(lower.contains(rule), "the skill does not mention: {rule}");
+    }
+    assert!(text.contains("](scripts/pty_run.py)"));
+    assert!(dir.join("scripts/pty_run.py").is_file());
+    assert!(
+        !Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("claude/skills/agentic-testing")
+            .exists()
+    );
+    assert!(
+        text.lines().count() <= 120,
+        "SKILL.md is short; details go to the linked files"
+    );
+}
+
 #[test]
 fn settings_snippet_allows_nv_and_has_no_hook() {
     let snippet: Value = serde_json::from_str(&repo_file("claude/settings.snippet.json")).unwrap();

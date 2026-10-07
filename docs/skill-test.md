@@ -8,6 +8,10 @@ Four real situations from `docs/design.md`. Say each one to Claude Code in a fre
 `~/.claude/CLAUDE.md`. Those lines are what should make a session save without being
 asked. For each situation, also note which skill loaded, and whether it loaded at all.
 
+To run this without doing it by hand, use the project skill `agentic-testing`
+(`.claude/skills/agentic-testing`): a script drives real Claude sessions and reports what
+they did.
+
 Use a scratch store so your real notes stay clean:
 
 ```
@@ -103,3 +107,28 @@ are in `docs/design.md`, "Decided while splitting the skill (step 7b)".
   company rules for AI tools are checked.
 - **Work laptop:** build, both test runs, the background embedder and offline search are
   only tested on Linux x86_64.
+
+### Trying to automate the hand test (2026-10-07)
+
+Three ways were tried so that the user does not have to run the sessions by hand:
+
+| Way | Result |
+| --- | --- |
+| Haiku subagent (Agent tool) | **Not a valid test.** The subagent never called the skill (it saw only the skill names) and worked out `nv` from the project `CLAUDE.md` and `--help`, because it ran in the nv repo. It saved three notes, with "Friday" as 2026-10-10 (a Saturday) and no correction. |
+| Headless `claude -p --model haiku` | **Not a valid test.** The skill was called, but its result was only "Execute skill: nv-capture" and the skill text is nowhere in the session log. Haiku answered "Saved" four times out of four without running `nv`; once it wrote to Claude's auto-memory instead. |
+| Interactive session driven through a pty (`pty_run.py`, not in the repo) | Valid: the same session type as the manual runs. Six sessions (two four-message runs, two passing remarks in a question, one Ukrainian, one Polish) **all called the right skill on the first message**, including `nv-recall` for the question with a passing decision. Then a **permission prompt for loading the skill** appeared, and the driver denied it, so no note was saved. The runs have to be repeated with that prompt approved. |
+
+Findings:
+
+- **For Haiku the skill listing has names only.** In all three manual Haiku sessions and
+  in the pty sessions, `nv-capture` and `nv-recall` appear without description (other
+  skills keep theirs); Opus sessions get the full descriptions. So for Haiku the lines in
+  `~/.claude/CLAUDE.md` are what makes it call the skill, and the descriptions do not
+  matter. The pty probe where the skill was not called is the proof of the risk: Haiku
+  wrote "Friday 2026-10-11" into Claude's own auto-memory and nothing into nv.
+- **In the default permission mode, loading a skill asks for permission**, once per skill.
+  The install allows only `Bash(nv:*)`. The user's sessions run in auto mode, which
+  approves it, so this was not seen in the manual runs. Adding `Skill(nv-capture)` and
+  `Skill(nv-recall)` to the allowed list is an open decision.
+- **A session started from inside Claude Code keeps no transcript** unless
+  `CLAUDE_CODE_FORCE_SESSION_PERSISTENCE=1` is set.
